@@ -1,13 +1,9 @@
-use nom::{Parser, character::complete::char, combinator::opt};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    IResult,
-    nmea_content::{
-        Parsable,
-        parse::{date_full_year, time, utc_offset},
-    },
+    self as nmea0183_parser, NmeaParse,
+    nmea_content::parse::{date_full_year, utc_offset},
 };
 
 /// ZDA - Time & Date - UTC, day, month, year and local time zone
@@ -21,33 +17,16 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug)]
+#[derive(Debug, NmeaParse)]
 pub struct ZDA {
     /// Fix time in UTC
     pub time: Option<time::Time>,
+    #[nmea(parser(date_full_year))]
     /// Fix date in UTC
     pub date: Option<time::Date>,
+    #[nmea(parser(utc_offset))]
     /// Local zone description, offset from UTC
     pub utc_offset: Option<time::UtcOffset>,
-}
-
-impl Parsable for ZDA {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, time) = opt(time).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, date) = date_full_year.parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, utc_offset) = utc_offset.parse(i)?;
-
-        Ok((
-            i,
-            ZDA {
-                time,
-                date,
-                utc_offset,
-            },
-        ))
-    }
 }
 
 impl From<time::OffsetDateTime> for ZDA {
@@ -75,6 +54,7 @@ impl From<ZDA> for Option<time::OffsetDateTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::IResult;
 
     #[test]
     fn test_zda_parsing() {
@@ -90,7 +70,7 @@ mod tests {
         ];
 
         for &input in &cases {
-            let result = ZDA::parser(input);
+            let result: IResult<_, _> = ZDA::parse(input);
             assert!(result.is_ok(), "Failed: {input:?}\n\t{result:?}");
         }
 
@@ -103,7 +83,8 @@ mod tests {
         ];
 
         for &input in &cases {
-            let result = ZDA::parser(input);
+            let result: IResult<_, _> = ZDA::parse(input);
+            println!("{:?}", &result);
             assert!(result.is_err(), "Failed: {input:?}\n\t{result:?}");
         }
     }

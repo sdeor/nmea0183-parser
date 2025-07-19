@@ -1,6 +1,6 @@
 use nom::{Err, IResult, Parser, error::ErrorKind};
 
-use crate::{LineEndingMode, crlf};
+use crate::nmea0183::{LineEndingMode, crlf};
 
 #[test]
 fn test_crlf() {

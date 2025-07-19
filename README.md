@@ -1,25 +1,39 @@
+<!-- cargo-sync-readme start -->
+
 # A Flexible NMEA Framing Parser for Rust
 
-**A zero-allocation NMEA 0183 parser that separates message framing from content parsing, giving you full control over how to handle your data.**
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE-MIT)
+[![Apache License 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE-APACHE)
+[![docs.rs](https://docs.rs/nmea0183-parser/badge.svg)](https://docs.rs/nmea0183-parser)
+[![Crates.io Version](https://img.shields.io/crates/v/nmea0183-parser.svg)](https://crates.io/crates/nmea0183-parser)
 
-This Rust crate provides a generic and configurable parser for NMEA 0183-style messages, with the typical format:
+**A zero-allocation NMEA 0183 parser that separates message framing from
+content parsing, giving you full control over data handling.**
+
+This Rust crate provides a generic and configurable parser for NMEA 0183-style
+messages, with the typical format:
 
 ```text
 $HHH,D1,D2,...,Dn*CC\r\n
 ```
 
-It focuses on parsing and validating the framing of NMEA 0183-style sentences (start character, optional checksum, and optional CRLF), allowing you to plug in your own domain-specific content parsers — or use built-in ones for common NMEA sentence types.
+It focuses on parsing and validating the framing of NMEA 0183-style sentences
+(start character, optional checksum, and optional CRLF), allowing you to plug
+in your own domain-specific content parsers — or use built-in ones for common
+NMEA sentence types.
 
 ---
 
 ## ✨ Why Use This Crate?
 
-Unlike traditional NMEA crates that tightly couple format and content parsing, `nmea0183_parser` lets you:
+Unlike traditional NMEA crates that tightly couple format and content parsing,
+`nmea0183_parser` lets you:
 
 - ✅ Choose your compliance level (strict vs lenient)
 - ✅ Plug in your own payload parser (GNSS, marine, custom protocols)
 - ✅ Support both `&str` and `&[u8]` inputs
-- ✅ Parse without allocations, built on top of [`nom`](https://github.com/Geal/nom), a parser combinator library in Rust."
+- ✅ Parse without allocations, built on top of [`nom`](https://github.com/Geal/nom),
+  a parser combinator library in Rust.
 
 Perfect for:
 
@@ -41,21 +55,12 @@ Perfect for:
 
 ---
 
-## 🚀 Getting Started
-
-Add the crate to your project:
-
-```toml
-[dependencies]
-nmea0183_parser = { git = "https://github.com/sdeor/nmea0183_parser" }
-```
-
-### ⚡ Quick Start
+## ⚡ Quick Start
 
 Here's a minimal example to get you started with parsing NMEA 0183-style sentences:
 
 ```rust
-use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, nmea0183};
+use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, Nmea0183ParserBuilder};
 use nom::Parser;
 
 // Simple content parser that splits fields by comma
@@ -64,8 +69,11 @@ fn parse_fields(input: &str) -> IResult<&str, Vec<&str>> {
 }
 
 // Create parser with strict validation (checksum + CRLF required)
-let parser_factory = nmea0183(ChecksumMode::Required, LineEndingMode::Required);
-let mut parser = parser_factory(parse_fields);
+let parser_factory = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Required)
+    .line_ending_mode(LineEndingMode::Required);
+
+let mut parser = parser_factory.build(parse_fields);
 
 // Parse a GPS sentence
 let result =
@@ -80,28 +88,37 @@ match result {
 }
 ```
 
-For custom parsing logic, you can define your own content parser. The `nmea0183` function creates a parser factory that you then call with your content parser:
+For custom parsing logic, you can define your own content parser. The `Nmea0183ParserBuilder`
+creates a parser factory that you then call with your content parser:
 
 ```rust
-use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, nmea0183};
+use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, Nmea0183ParserBuilder};
 use nom::Parser;
 
 // Your custom logic for the inner data portion (after "$" and before "*CC").
-// The parse_content function should return an IResult<Input, Output> type so it can be used with the `nmea0183` factory.
-// The `Output` type can be any Rust type you define, such as a struct or enum.
+// The `parse_content` function should return an IResult<Input, Output> type
+// so it can be used with the framing parser.
+// The `Output` type can be any Rust type you define, such as a struct or an enum.
 fn parse_content(input: &str) -> IResult<&str, Vec<&str>> {
-    // You can decode fields here, split by commas, etc.
+    // You can decode fields here. In this example, we split the input by commas.
     Ok(("", input.split(',').collect()))
 }
 
-// The `nmea0183` function returns a factory that takes your content parser
-let parser_factory = nmea0183(ChecksumMode::Required, LineEndingMode::Required);
-let mut parser = parser_factory(parse_content);
+// The `Nmea0183ParserBuilder` creates a parser factory that you then call
+// with your content parser.
+let parser_factory = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Required)
+    .line_ending_mode(LineEndingMode::Required);
+
+let mut parser = parser_factory.build(parse_content);
 
 // Or combine into one line:
-// let mut parser = nmea0183(ChecksumMode::Required, LineEndingMode::Required)(parse_content);
+// let mut parser = Nmea0183ParserBuilder::new()
+//     .checksum_mode(ChecksumMode::Required)
+//     .line_ending_mode(LineEndingMode::Required)
+//     .build(parse_content);
 
-// Try parsing a message
+// Now you can use the parser to parse your NMEA sentences.
 match parser.parse("$Header,field1,field2*3C\r\n") {
     Ok((remaining, fields)) => {
         assert_eq!(remaining, "");
@@ -126,9 +143,11 @@ match parser.parse("$Header,field1,field2*3C\r\n") {
    - Type conversion
    - Domain-specific logic
 
-You get full control over how sentence content is interpreted.
+You have full control over sentence content interpretation.
 
-In the above example, `parse_content` is your custom logic that processes the inner data of the sentence. The `nmea0183` function creates a parser that handles the framing, while you focus on the content.
+In the above example, `parse_content` is your custom logic that processes the inner
+data of the sentence. The `Nmea0183ParserBuilder` creates a parser that handles the
+framing, while you focus on the content.
 
 ---
 
@@ -137,7 +156,7 @@ In the above example, `parse_content` is your custom logic that processes the in
 You can configure the parser's behavior using `ChecksumMode` and `LineEndingMode`:
 
 ```rust
-use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, nmea0183};
+use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, Nmea0183ParserBuilder};
 use nom::Parser;
 
 fn content_parser(input: &str) -> IResult<&str, bool> {
@@ -145,47 +164,67 @@ fn content_parser(input: &str) -> IResult<&str, bool> {
 }
 
 // Strict: checksum and CRLF both required
-let mut strict = nmea0183(ChecksumMode::Required, LineEndingMode::Required)(content_parser);
-assert!(strict.parse("$GPGGA,data*6A\r\n").is_ok());
-assert!(strict.parse("$GPGGA,data*6A").is_err());  // Missing CRLF
-assert!(strict.parse("$GPGGA,data\r\n").is_err()); // Missing checksum
+let mut strict_parser = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Required)
+    .line_ending_mode(LineEndingMode::Required)
+    .build(content_parser);
 
-// Checksum required, CRLF forbidden
-let mut no_crlf = nmea0183(ChecksumMode::Required, LineEndingMode::Forbidden)(content_parser);
-assert!(no_crlf.parse("$GPGGA,data*6A").is_ok());
-assert!(no_crlf.parse("$GPGGA,data*6A\r\n").is_err());
-assert!(no_crlf.parse("$GPGGA,data").is_err());
+assert!(strict_parser.parse("$GPGGA,data*6A\r\n").is_ok());
+assert!(strict_parser.parse("$GPGGA,data*6A").is_err()); // (missing CRLF)
+assert!(strict_parser.parse("$GPGGA,data\r\n").is_err()); // (missing checksum)
+
+// Checksum required, no CRLF allowed
+let mut no_crlf_parser = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Required)
+    .line_ending_mode(LineEndingMode::Forbidden)
+    .build(content_parser);
+
+assert!(no_crlf_parser.parse("$GPGGA,data*6A").is_ok());
+assert!(no_crlf_parser.parse("$GPGGA,data*6A\r\n").is_err()); // (CRLF present)
+assert!(no_crlf_parser.parse("$GPGGA,data").is_err()); // (missing checksum)
 
 // Checksum optional, CRLF required
-let mut optional_checksum = nmea0183(ChecksumMode::Optional, LineEndingMode::Required)(content_parser);
-assert!(optional_checksum.parse("$GPGGA,data*6A\r\n").is_ok());
-assert!(optional_checksum.parse("$GPGGA,data\r\n").is_ok());
-assert!(optional_checksum.parse("$GPGGA,data*99\r\n").is_err());
-assert!(optional_checksum.parse("$GPGGA,data*6A").is_err());
+let mut optional_checksum_parser = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Optional)
+    .line_ending_mode(LineEndingMode::Required)
+    .build(content_parser);
+
+assert!(optional_checksum_parser.parse("$GPGGA,data*6A\r\n").is_ok()); // (with valid checksum)
+assert!(optional_checksum_parser.parse("$GPGGA,data\r\n").is_ok()); // (without checksum)
+assert!(optional_checksum_parser.parse("$GPGGA,data*99\r\n").is_err()); // (invalid checksum)
+assert!(optional_checksum_parser.parse("$GPGGA,data*6A").is_err()); // (missing CRLF)
 
 // Lenient: checksum optional, CRLF forbidden
-let mut lenient = nmea0183(ChecksumMode::Optional, LineEndingMode::Forbidden)(content_parser);
-assert!(lenient.parse("$GPGGA,data*6A").is_ok());
-assert!(lenient.parse("$GPGGA,data").is_ok());
-assert!(lenient.parse("$GPGGA,data*99").is_err());
-assert!(lenient.parse("$GPGGA,data\r\n").is_err());
+let mut lenient_parser = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Optional)
+    .line_ending_mode(LineEndingMode::Forbidden)
+    .build(content_parser);
+
+assert!(lenient_parser.parse("$GPGGA,data*6A").is_ok()); // (with valid checksum)
+assert!(lenient_parser.parse("$GPGGA,data").is_ok()); // (without checksum)
+assert!(lenient_parser.parse("$GPGGA,data*99").is_err()); // (invalid checksum)
+assert!(lenient_parser.parse("$GPGGA,data\r\n").is_err()); // (CRLF present)
 ```
 
 ---
 
 ## 🔍 Parsing Both String and Byte Inputs
 
-The parser can handle both `&str` and `&[u8]` inputs. You can define your content parser to work with either type, and the factory will adapt accordingly.
+The parser can handle both `&str` and `&[u8]` inputs. You can define your content
+parser for either type; the factory will adapt accordingly.
 
 ```rust
-use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, nmea0183};
+use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, Nmea0183ParserBuilder};
 use nom::Parser;
 
 fn parse_content_str(input: &str) -> IResult<&str, Vec<&str>> {
     Ok(("", input.split(',').collect()))
 }
 
-let mut parser_str = nmea0183(ChecksumMode::Required, LineEndingMode::Required)(parse_content_str);
+let mut parser_str = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Required)
+    .line_ending_mode(LineEndingMode::Required)
+    .build(parse_content_str);
 
 // Parse from string
 let string_input = "$Header,field1,field2*3C\r\n";
@@ -199,7 +238,10 @@ fn parse_content_bytes(input: &[u8]) -> IResult<&[u8], u8> {
     Ok((input, first_byte))
 }
 
-let mut parser_bytes = nmea0183(ChecksumMode::Required, LineEndingMode::Required)(parse_content_bytes);
+let mut parser_bytes = Nmea0183ParserBuilder::new()
+    .checksum_mode(ChecksumMode::Required)
+    .line_ending_mode(LineEndingMode::Required)
+    .build(parse_content_bytes);
 
 // Parse from bytes
 let byte_input = b"$Header,field1,field2*3C\r\n";
@@ -211,28 +253,149 @@ assert_eq!(result_bytes.unwrap().1, 72); // 'H' is the first byte of the content
 
 ---
 
-## 🧱 Built-in NMEA Sentence Content Parser
+## 🧩 `NmeaParse` trait and `#[derive(NmeaParse)]` Macro
 
-Alongside the flexible framing parser, this crate provides a built-in content parser for common NMEA 0183 sentence types.
+The `NmeaParse` trait provides a generic interface for parsing values from NMEA 0183-style
+content, supporting both primitive and composite types. Implementations are provided for
+primitive types, `Option<T>`, `Vec<T>`, and more types, and you can implement this trait
+for your own types to enable custom parsing logic.
 
-This parser parses only the content. It does not handle framing — such as the initial `$`, optional checksum (`*CC`), or optional CRLF (`\r\n`). That responsibility belongs to the factory function, which wraps around the content parser.
+### Implementing the `NmeaParse` Trait
 
-To parse a complete NMEA sentence, you can use the `nmea0183` factory with the built-in content parser:
+To implement the `NmeaParse` trait for your type, you need to provide a `parse` method that
+takes an input and returns an `IResult` with the remaining input and the parsed value.
+
+NMEA 0183 fields are typically comma-separated. When parsing composite types (like structs),
+you usually want to consume the separator before parsing each subsequent field. However, for
+optional fields (`Option<T>`) or repeated fields (`Vec<T>`), always consuming the separator
+can cause issues if the field is missing.
+
+To address this, the trait provides a `parse_preceded(separator)` method. This method ensures
+the separator is only consumed if the field is present. By default, `parse_preceded` is
+implemented as a simple wrapper around `preceded(separator, Self::parse)`, but you can override
+it for custom behavior—such as the implementations for `Option<T>` and `Vec<T>`.
+
+This design gives you fine-grained control over field parsing and separator handling, making
+it easy to implement robust NMEA content parsers for your own types.
+
+### Deriving the `NmeaParse` Trait
+
+Based on [`nom-derive`] and with a lot of similarities, `NmeaParse` is a custom derive
+attribute to derive content parsers for your NMEA 0183-style data structures.
+
+The `NmeaParse` derive macro automatically generates an implementation of the `NmeaParse` trait
+for your structs and enums using `nom` parsers when possible. This allows you to define your
+data structures and derive parsing logic without writing boilerplate code.
+
+For example, you can define a struct and derive the `NmeaParse` trait like this:
 
 ```rust
-#[cfg(feature = "nmea-content")]
-{
+use nmea0183_parser::NmeaParse;
+
+#[derive(NmeaParse)]
+struct Data {
+    pub id: u8,
+    pub value: f64,
+    pub timestamp: u64,
+}
+```
+
+This will generate an implementation of the `NmeaParse` trait for the `Data` struct,
+allowing you to parse NMEA 0183-style input into instances of `Data`.
+The generated code will look something like this (simplified):
+
+```rust,ignore
+impl NmeaParse for Data {
+    fn parse(i: &'a str) -> nmea0183_parser::IResult<&'a str, Self, Error> {
+        let (i, id) = <u8>::parse(i)?;
+        let (i, value) = <f64>::parse_preceded(nom::character::complete::char(',')).parse(i)?;
+        let (i, timestamp) = <u64>::parse_preceded(nom::character::complete::char(',')).parse(i)?;
+
+        Ok((i, Data { id, value, timestamp }))
+    }
+}
+```
+
+You can now parse an input containing NMEA 0183-style content into a `Data` struct:
+
+```rust
+let input = "123,45.67,1622547800";
+let result: IResult<_, _> = Data::parse(input);
+let (remaining, data) = result.unwrap();
+assert!(remaining.is_empty());
+assert_eq!(data.id, 123);
+assert_eq!(data.value, 45.67);
+assert_eq!(data.timestamp, 1622547800);
+```
+
+The macro also supports enums, which require a `selector` attribute to determine which
+variant to parse:
+
+```rust
+use nmea0183_parser::{Error, IResult, NmeaParse};
+
+#[derive(NmeaParse)]
+#[nmea(selector(u8::parse))]
+enum Data {
+    #[nmea(selector(0))]
+    TypeA { id: u8, value: u16 },
+    #[nmea(selector(1))]
+    TypeB { values: [u8; 4] },
+}
+
+let input = "0,42,100";
+let result: IResult<_, _> = Data::parse(input);
+assert!(matches!(result, Ok((_, Data::TypeA { id: 42, value: 100 }))));
+
+let input = "1,2,3,4,5";
+let result: IResult<_, _> = Data::parse(input);
+assert!(matches!(result, Ok((_, Data::TypeB { values: [2, 3, 4, 5] }))));
+
+let input = "2,42";
+// Expecting an error because no variant matches selector 2
+let error = Data::parse(input).unwrap_err();
+assert!(matches!(error,
+    nom::Err::Error(Error::ParsingError(nom::error::Error {
+        code: nom::error::ErrorKind::Switch,
+        ..
+    }))
+));
+```
+
+You can use the `#[derive(NmeaParse)]` attribute on your structs and enums to automatically
+generate parsing logic based on the field types. The macro will try to infer parsers for
+known types (implementors of the `NmeaParse` trait), but you can also customize the parsing
+behavior using attributes.
+
+For more details on how to use the `NmeaParse` derive macro and customize parsing behavior,
+refer to the [documentation](https://docs.rs/nmea0183-parser/latest/nmea0183-parser/derive.NmeaParse.html).
+
+---
+
+## 🧱 Built-in NMEA Sentence Content Parser
+
+Alongside the flexible framing parser, this crate can provide a built-in `NmeaSentence`
+content parser for common NMEA 0183 sentence types. To use it, enable the `nmea-content`
+feature in your `Cargo.toml`.
+
+This parser uses the `NmeaParse` trait to provide content-only parsing. It does not handle
+framing — such as the initial `$`, optional checksum (`*CC`), or optional CRLF (`\r\n`).
+That responsibility belongs to the framing parser, which wraps around the content parser.
+
+To parse a complete NMEA sentence, you can use the `Nmea0183ParserBuilder` with the built-in
+content parser:
+
+```rust
 use nmea0183_parser::{
-    ChecksumMode, LineEndingMode,
-    nmea_content::{NmeaSentence, Parsable, Quality},
-    nmea0183,
+    IResult, Nmea0183ParserBuilder, NmeaParse,
+    nmea_content::{GGA, Location, NmeaSentence, Quality},
 };
 use nom::Parser;
 
-let mut nmea_parser =
-    nmea0183(ChecksumMode::Required, LineEndingMode::Required)(NmeaSentence::parser);
+// Defaults to strict parsing with both checksum and CRLF required
+let mut nmea_parser = Nmea0183ParserBuilder::new().build(NmeaSentence::parse);
 
-let result =
+let result: IResult<_, _> =
     nmea_parser.parse("$GPGGA,123456.00,4916.29,N,12311.76,W,1,08,0.9,545.4,M,46.9,M,,*73\r\n");
 
 assert!(
@@ -241,32 +404,25 @@ assert!(
     result.unwrap_err()
 );
 
-let sentence = result.unwrap().1;
-
-match sentence {
-    NmeaSentence::GGA(gga) => {
-        assert_eq!(gga.latitude, Some(49.2715));
-        assert_eq!(gga.longitude, Some(-123.196));
-        assert_eq!(gga.fix_quality, Quality::GPSFix);
-        assert_eq!(gga.satellite_count, Some(8));
-        assert_eq!(gga.hdop, Some(0.9));
-        // etc...
-    }
-    _ => {
-        println!("Parsed other NMEA sentence");
-    }
-}
-}
+let (_, sentence) = result.unwrap();
+assert!(matches!(
+    sentence,
+    NmeaSentence::GGA(GGA {
+        location: Some(Location {
+            latitude: 49.2715,
+            longitude: -123.196,
+        }),
+        fix_quality: Quality::GPSFix,
+        satellite_count: Some(8),
+        hdop: Some(0.9),
+        ..
+    })
+));
 ```
 
-Enable the content parser with the `nmea-content` feature:
-
-```toml
-[dependencies]
-nmea0183_parser = { git = "https://github.com/sdeor/nmea0183_parser", features = ["nmea-content"] }
-```
-
-**Note:** While the `nmea0183` framing parser can accept both `&str` and `&[u8]` inputs, the built-in content parser only accepts `&str`, as it is designed specifically for text-based NMEA sentences.
+> **Note:** While the `Nmea0183ParserBuilder` framing parser can accept both `&str` and `&[u8]`
+> inputs, the built-in content parser only accepts `&str`, as it is designed specifically for
+> text-based NMEA sentences.
 
 ### Supported NMEA Sentences
 
@@ -282,7 +438,8 @@ nmea0183_parser = { git = "https://github.com/sdeor/nmea0183_parser", features =
 
 ### NMEA Version Support
 
-Different NMEA versions may include additional fields in certain sentence types. You can choose the version that matches your equipment by enabling the appropriate feature flags.
+Different NMEA versions may include additional fields in certain sentence types.
+You can choose the version that matches your equipment by enabling the appropriate feature flags.
 
 | Feature Flag   | NMEA Version | When to Use                |
 | -------------- | ------------ | -------------------------- |
@@ -291,20 +448,23 @@ Different NMEA versions may include additional fields in certain sentence types.
 | `nmea-v3-0`    | NMEA 3.0     | Mid-range equipment        |
 | `nmea-v4-11`   | NMEA 4.11    | Modern equipment           |
 
-For specific field differences between versions, please refer to the [NMEA 0183 standard documentation](https://gpsd.gitlab.io/gpsd/NMEA.html).
+For specific field differences between versions, please refer to the
+[NMEA 0183 standard documentation](https://gpsd.gitlab.io/gpsd/NMEA.html).
 
-Example configuration:
+<!-- cargo-sync-readme end -->
 
-```toml
-[dependencies]
-# For basic NMEA parsing
-nmea0183_parser = { git = "https://github.com/sdeor/nmea0183_parser", features = ["nmea-content"] }
+---
 
-# For modern equipment with NMEA 4.11 support
-nmea0183_parser = { git = "https://github.com/sdeor/nmea0183_parser", features = ["nmea-content", "nmea-v4-11"] }
-```
+## 🚀 Coming Soon
 
-You can read more about the NMEA 0183 standard [here](https://gpsd.gitlab.io/gpsd/NMEA.html).
+- 📘 Comprehensive examples and tutorials for common use cases
+- 🔧 Additional NMEA sentence types and protocol support
+
+---
+
+## 📝 License
+
+This project is licensed under the [MIT License](./LICENSE-MIT) and [Apache License 2.0](./LICENSE-APACHE). You can choose either license for your use.
 
 ---
 
@@ -317,7 +477,7 @@ Contributions are very welcome! Open an issue or PR for:
 - Documentation improvements
 - New content parsers for additional NMEA sentences
 
-You can submit [issues](https://github.com/sdeor/nmea0183_parser/issues) or [pull requests](https://github.com/sdeor/nmea0183_parser/pulls) to contribute.
+You can submit [issues](https://github.com/sdeor/nmea0183-parser/issues) or [pull requests](https://github.com/sdeor/nmea0183-parser/pulls) to contribute.
 
 ---
 

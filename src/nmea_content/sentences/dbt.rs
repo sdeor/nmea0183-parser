@@ -1,11 +1,11 @@
-use nom::{Parser, character::complete::char, number::complete::float};
+use nom::{
+    AsBytes, AsChar, Compare, Input, Offset, ParseTo, Parser, character::complete::char,
+    error::ParseError,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    IResult,
-    nmea_content::{Parsable, parse::opt_with_unit},
-};
+use crate::{self as nmea0183_parser, IResult, NmeaParse, nmea_content::parse::with_unit};
 
 /// DBT - Depth Below Transducer
 ///
@@ -18,24 +18,30 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug)]
+#[derive(Debug, NmeaParse)]
 pub struct DBT {
+    #[nmea(parser(water_depth))]
     /// Water depth in meters
     pub water_depth: Option<f32>,
 }
 
-impl Parsable for DBT {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, water_depth_feet) = opt_with_unit(float, 'f').parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, water_depth_meters) = opt_with_unit(float, 'M').parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, water_depth_fathoms) = opt_with_unit(float, 'F').parse(i)?;
+fn water_depth<I, E>(i: I) -> IResult<I, Option<f32>, E>
+where
+    I: Input + Offset + ParseTo<f32> + AsBytes,
+    I: for<'a> Compare<&'a [u8]> + Compare<&'static str>,
+    <I as Input>::Item: AsChar,
+    <I as Input>::Iter: Clone,
+    E: ParseError<I>,
+{
+    let (i, water_depth_feet) = with_unit('f').parse(i)?;
+    let (i, _) = char(',').parse(i)?;
+    let (i, water_depth_meters) = with_unit('M').parse(i)?;
+    let (i, _) = char(',').parse(i)?;
+    let (i, water_depth_fathoms) = with_unit('F').parse(i)?;
 
-        let water_depth = water_depth_meters
-            .or(water_depth_feet.map(|feet| feet * 0.3048))
-            .or(water_depth_fathoms.map(|fathoms| fathoms * 1.8288));
+    let water_depth = water_depth_meters
+        .or(water_depth_feet.map(|feet: f32| feet * 0.3048))
+        .or(water_depth_fathoms.map(|fathoms: f32| fathoms * 1.8288));
 
-        Ok((i, Self { water_depth }))
-    }
+    Ok((i, water_depth))
 }

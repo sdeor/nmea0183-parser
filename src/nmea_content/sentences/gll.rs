@@ -1,15 +1,11 @@
-use nom::{Parser, character::complete::char, combinator::opt};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "nmea-v2-3")]
 use crate::nmea_content::FaaMode;
 use crate::{
-    IResult,
-    nmea_content::{
-        Parsable, Status,
-        parse::{latlon, time},
-    },
+    self as nmea0183_parser, NmeaParse,
+    nmea_content::{Location, Status, parse::location},
 };
 
 /// GLL - Geographic Position - Latitude/Longitude
@@ -30,73 +26,50 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug)]
+#[derive(Debug, NmeaParse)]
 pub struct GLL {
-    /// Latitude in degrees
-    pub latitude: Option<f64>,
-    /// Longitude in degrees
-    pub longitude: Option<f64>,
+    #[nmea(parser(location))]
+    /// Location (latitude and longitude)
+    pub location: Option<Location>,
     /// Fix time in UTC
     pub fix_time: Option<time::Time>,
     /// Status Mode Indicator
     pub status: Status,
     #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
     /// FAA Mode Indicator
     pub faa_mode: Option<FaaMode>,
 }
 
-impl Parsable for GLL {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, (latitude, longitude)) = latlon.parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, fix_time) = opt(time).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, status) = Status::parser(i)?;
-
-        #[cfg(feature = "nmea-v2-3")]
-        let (i, _) = char(',').parse(i)?;
-        #[cfg(feature = "nmea-v2-3")]
-        let (i, faa_mode) = opt(FaaMode::parser).parse(i)?;
-
-        Ok((
-            i,
-            Self {
-                latitude,
-                longitude,
-                fix_time,
-                status,
-                #[cfg(feature = "nmea-v2-3")]
-                faa_mode,
-            },
-        ))
-    }
-}
-
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
+    use crate::IResult;
 
     #[test]
     fn test_gll_parsing() {
-        let cases = [",", ",A", ",Z"];
+        let cases = [",", ",A"];
 
         for &input in &cases {
             let i = format!("4404.14012,N,12118.85993,W,001037.00,A{}", input);
 
-            let result = GLL::parser(&i);
+            let result: IResult<_, _> = GLL::parse(i.as_str());
             assert!(result.is_ok(), "Failed: {input:?}\n\t{result:?}");
+
+            println!("Parsed GLL: {:?}", result.unwrap());
         }
+    }
 
-        #[cfg(feature = "nmea-v2-3")]
-        {
-            let cases = ["", "Z"];
+    #[cfg(feature = "nmea-v2-3")]
+    #[test]
+    fn test_gll_parsing_v2_3() {
+        let cases = ["", "Z", ",Z"];
 
-            for &input in &cases {
-                let i = format!("4404.14012,N,12118.85993,W,001037.00,A{}", input);
+        for &input in &cases {
+            let i = format!("4404.14012,N,12118.85993,W,001037.00,A{}", input);
 
-                let result = GLL::parser(&i);
-                assert!(result.is_err(), "Failed: {input:?}\n\t{result:?}");
-            }
+            let result: IResult<_, _> = GLL::parse(i.as_str());
+            assert!(result.is_err(), "Failed: {input:?}\n\t{result:?}");
         }
     }
 }

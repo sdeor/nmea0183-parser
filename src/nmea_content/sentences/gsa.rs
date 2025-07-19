@@ -1,19 +1,11 @@
-use nom::{
-    Parser,
-    character::complete::{char, u8},
-    combinator::opt,
-    multi::fill,
-    number::complete::float,
-    sequence::preceded,
-};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "nmea-v4-11")]
 use crate::nmea_content::SystemId;
 use crate::{
-    IResult,
-    nmea_content::{FixMode, Parsable, SelectionMode},
+    self as nmea0183_parser, NmeaParse,
+    nmea_content::{FixMode, SelectionMode},
 };
 
 /// GSA - GPS DOP and active satellites
@@ -34,12 +26,13 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug)]
+#[derive(Debug, PartialEq, NmeaParse)]
 pub struct GSA {
     /// Selection mode
     pub selection_mode: SelectionMode,
     /// Fix mode
     pub fix_mode: FixMode,
+    #[nmea(map(|sats| sats.into_iter().flatten().collect()), parse_as([Option<u8>; 12]))]
     /// PRN numbers of the satellites used in the fix, up to 12
     pub fix_sats_prn: heapless::Vec<u8, 12>,
     /// Position Dilution of Precision
@@ -49,46 +42,34 @@ pub struct GSA {
     /// Vertical Dilution of Precision
     pub vdop: Option<f32>,
     #[cfg(feature = "nmea-v4-11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
     /// System ID of the GNSS system used for the fix
     pub system_id: Option<SystemId>,
 }
 
-impl Parsable for GSA {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, selection_mode) = SelectionMode::parser(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, fix_mode) = FixMode::parser(i)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::IResult;
 
-        let mut fix_sats_prn = [None; 12];
-        let (i, _) = fill(preceded(char(','), opt(u8)), &mut fix_sats_prn).parse(i)?;
-
-        let (i, _) = char(',').parse(i)?;
-        let (i, pdop) = opt(float).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, hdop) = opt(float).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, vdop) = opt(float).parse(i)?;
-
-        #[cfg(feature = "nmea-v4-11")]
-        let (i, _) = char(',').parse(i)?;
-        #[cfg(feature = "nmea-v4-11")]
-        let (i, system_id) = opt(SystemId::parser).parse(i)?;
-
-        Ok((
-            i,
-            Self {
-                selection_mode,
-                fix_mode,
-                fix_sats_prn: fix_sats_prn
-                    .into_iter()
-                    .flatten()
-                    .collect::<heapless::Vec<_, 12>>(),
-                pdop,
-                hdop,
-                vdop,
-                #[cfg(feature = "nmea-v4-11")]
-                system_id,
-            },
-        ))
+    #[test]
+    fn test_gsa_parsing() {
+        let input = "A,3,1,2,3,,5,6,,8,9,,11,12,1.0,,3.0,";
+        let expected = GSA {
+            selection_mode: SelectionMode::Automatic,
+            fix_mode: FixMode::Fix3D,
+            fix_sats_prn: heapless::Vec::from_slice(&[1, 2, 3, 5, 6, 8, 9, 11, 12]).unwrap(),
+            pdop: Some(1.0),
+            hdop: None,
+            vdop: Some(3.0),
+            #[cfg(feature = "nmea-v4-11")]
+            system_id: None,
+        };
+        let result: IResult<_, _> = GSA::parse(input);
+        if cfg!(feature = "nmea-v4-11") {
+            assert_eq!(result, Ok(("", expected)));
+        } else {
+            assert_eq!(result, Ok((",", expected)));
+        }
     }
 }

@@ -1,24 +1,11 @@
 #[cfg(feature = "nmea-v4-11")]
-use nom::{
-    Input,
-    combinator::{cond, opt},
-    number::complete::hex_u32,
-};
-use nom::{
-    Parser,
-    character::complete::{char, u8},
-    multi::many0,
-    sequence::preceded,
-};
+use nom::{Input, combinator::opt, number::complete::hex_u32};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "nmea-v4-11")]
 use crate::nmea_content::SignalId;
-use crate::{
-    IResult,
-    nmea_content::{Parsable, Satellite},
-};
+use crate::{self as nmea0183_parser, NmeaParse, nmea_content::Satellite};
 
 /// GSV - Satellites in View
 ///
@@ -31,7 +18,7 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug)]
+#[derive(Debug, NmeaParse)]
 pub struct GSV {
     /// Total number of GSV sentences to be transmitted in this group
     pub total_messages: u8,
@@ -42,44 +29,19 @@ pub struct GSV {
     /// Satellite information
     pub satellites: heapless::Vec<Satellite, 4>,
     #[cfg(feature = "nmea-v4-11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
+    #[nmea(map(Option::flatten))]
+    #[nmea(cond(!satellites.is_empty() || nmea_input.input_len() > 0))]
+    #[nmea(map(|id| id.map(|hex| hex as u8)))]
+    #[nmea(parser(opt(hex_u32)))]
     /// Signal ID of the GNSS system used for the fix
     pub signal_id: Option<SignalId>,
-}
-
-impl Parsable for GSV {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, total_messages) = u8.parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, message_number) = u8.parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, satellites_in_view) = u8.parse(i)?;
-        let (i, satellites) = many0(preceded(char(','), Satellite::parser)).parse(i)?;
-
-        #[cfg(feature = "nmea-v4-11")]
-        let (i, signal_id) = cond(
-            !satellites.is_empty() || i.input_len() > 0,
-            preceded(char(','), opt(hex_u32.map(|id| id as u8))),
-        )
-        .map(Option::flatten)
-        .parse(i)?;
-
-        Ok((
-            i,
-            Self {
-                total_messages,
-                message_number,
-                satellites_in_view,
-                satellites: satellites.into_iter().collect::<heapless::Vec<_, 4>>(),
-                #[cfg(feature = "nmea-v4-11")]
-                signal_id,
-            },
-        ))
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::IResult;
 
     #[test]
     fn test_gsv_parsing() {
@@ -102,8 +64,9 @@ mod tests {
         ];
 
         for &input in &cases {
-            let result = GSV::parser(input);
+            let result: IResult<_, _> = GSV::parse(input);
             assert!(result.is_ok(), "Failed: {input:?}\n\t{result:?}");
+            println!("Parsed: {input:?} -> {result:?}");
         }
 
         #[cfg(feature = "nmea-v4-11")]
@@ -124,7 +87,7 @@ mod tests {
             ];
 
             for &input in &cases {
-                let result = GSV::parser(input);
+                let result: IResult<_, _> = GSV::parse(input);
                 assert!(result.is_err(), "Failed: {input:?}\n\t{result:?}");
             }
         }

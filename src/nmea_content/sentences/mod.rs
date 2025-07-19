@@ -18,51 +18,11 @@ pub use rmc::RMC;
 pub use vtg::VTG;
 pub use zda::ZDA;
 
-use nom::{
-    Parser,
-    bytes::complete::take,
-    character::complete::{char, u8, u16},
-    combinator::opt,
-    error::ErrorKind,
-};
+use nom::{bytes::complete::take, character::complete::one_of};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
-use crate::{Error, IResult, consumed};
-
-/// A trait for types that can be parsed from a string input.
-///
-/// This trait defines a single method `parser` that takes a string slice
-/// and returns an `IResult` containing the remaining input and the parsed value.
-///
-/// This trait is implemented by all strongly-typed NMEA sentence structs
-/// and the `NmeaSentence` enum, allowing them to be parsed using the
-/// `nmea0183` framing parser.
-pub trait Parsable: Sized {
-    /// Parses the input and returns a result.
-    ///
-    /// # Arguments
-    ///
-    /// * `input` - The input to parse into `Self`.
-    ///
-    /// # Returns
-    ///
-    /// Returns an [`IResult`] containing:
-    /// - On success: A tuple of `(remaining_input, parsed_value)`, where `remaining_input`
-    ///   is the unparsed portion of the input and `parsed_value` is the successfully parsed
-    ///   instance of `Self`.
-    /// - On failure: An [`Error`] indicating the parsing error.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use nmea0183_parser::nmea_content::{NmeaSentence, Parsable};
-    ///
-    /// // Parse complete sentence content (including talker ID and sentence type)
-    /// let content = "GPGGA,123456.00,4916.29,N,12311.76,W,1,08,0.9,545.4,M,46.9,M,,";
-    /// let result = NmeaSentence::parser(content);
-    /// assert!(result.is_ok());
-    /// ```
-    fn parser(input: &str) -> IResult<&str, Self>;
-}
+use crate::{self as nmea0183_parser, Error, NmeaParse};
 
 /// A unified enum representing all supported NMEA 0183 sentence types.
 ///
@@ -73,9 +33,9 @@ pub trait Parsable: Sized {
 /// ## Design Philosophy
 ///
 /// `NmeaSentence` serves as the built-in content parser that works seamlessly with
-/// the [`nmea0183`](crate::nmea0183) framing parser. While the framing parser handles
-/// the outer NMEA structure (`$`, checksum, CRLF validation), [`NmeaSentence::parser`] focuses
-/// on parsing and validating the inner sentence content.
+/// the [`Nmea0183ParserBuilder`](crate::Nmea0183ParserBuilder) framing parser.
+/// While the framing parser handles the outer NMEA structure (`$`, checksum, CRLF validation),
+/// [`NmeaSentence::parse`] focuses on parsing and validating the inner sentence content.
 ///
 /// This design allows you to:
 /// - Easily parse any supported NMEA sentence type using a single parser
@@ -93,9 +53,9 @@ pub trait Parsable: Sized {
 /// ## Example Usage
 ///
 /// ```rust
-/// use nmea0183_parser::nmea_content::{NmeaSentence, Parsable};
+/// use nmea0183_parser::{IResult, NmeaParse, nmea_content::NmeaSentence};
 ///
-/// let result = NmeaSentence::parser("GPZDA,123456.78,29,02,2024,03,00");
+/// let result: IResult<_, _> = NmeaSentence::parse("GPZDA,123456.78,29,02,2024,03,00");
 /// assert!(result.is_ok());
 ///
 /// let sentence = result.unwrap().1;
@@ -113,61 +73,64 @@ pub trait Parsable: Sized {
 ///
 /// ```rust
 /// use nmea0183_parser::{
-///     ChecksumMode, LineEndingMode, nmea0183,
-///     nmea_content::{NmeaSentence, Parsable}
+///     ChecksumMode, IResult, LineEndingMode, Nmea0183ParserBuilder, NmeaParse,
+///     nmea_content::NmeaSentence,
 /// };
 /// use nom::Parser;
 ///
 /// // Create a complete NMEA parser
-/// let mut parser = nmea0183(ChecksumMode::Required, LineEndingMode::Required)(NmeaSentence::parser);
+/// let mut parser = Nmea0183ParserBuilder::new()
+///     .checksum_mode(ChecksumMode::Required)
+///     .line_ending_mode(LineEndingMode::Required)
+///     .build(NmeaParse::parse);
 ///
 /// // Parse a complete NMEA sentence
 /// let input = "$GPGSV,3,2,12,01,40,083,45*44\r\n";
-/// let result = parser.parse(input);
-///
+/// let result: IResult<_, _> = parser.parse(input);
 /// match result {
-///     Ok((remaining, sentence)) => {
-///         match sentence {
-///             NmeaSentence::GGA(gga) => {
-///                 println!("GPS position: {:?}, {:?}", gga.latitude, gga.longitude);
-///                 println!("Fix quality: {:?}", gga.fix_quality);
-///                 println!("Satellites: {:?}", gga.satellite_count);
-///             }
-///             NmeaSentence::RMC(rmc) => {
-///                 println!("Speed: {:?} knots", rmc.speed_over_ground);
-///                 println!("Course: {:?}°", rmc.course_over_ground);
-///             }
-///             NmeaSentence::GSV(gsv) => {
-///                 println!("Satellites in view: {:?}", gsv.satellites);
-///             }
-///             _ => println!("Other sentence type parsed"),
+///     Ok((_remaining, sentence)) => match sentence {
+///         NmeaSentence::GGA(gga) => {
+///             println!("GPS location: {:?}", gga.location);
+///             println!("Fix quality: {:?}", gga.fix_quality);
+///             println!("Satellites: {:?}", gga.satellite_count);
 ///         }
-///     }
+///         NmeaSentence::RMC(rmc) => {
+///             println!("Speed: {:?} knots", rmc.speed_over_ground);
+///             println!("Course: {:?}°", rmc.course_over_ground);
+///         }
+///         NmeaSentence::GSV(gsv) => {
+///             println!("Satellites in view: {:?}", gsv.satellites);
+///         }
+///         _ => println!("Other sentence type parsed"),
+///     },
 ///     Err(e) => println!("Parse error: {:?}", e),
 /// }
 /// ```
 ///
 /// ## Supported Sentence Types
 ///
-/// | Variant      | Sentence Type                                           | Description                      |
-/// |--------------|---------------------------------------------------------|----------------------------------|
-/// | DBT([`DBT`]) | Depth Below Transducer                                  | Water depth measurements         |
-/// | DPT([`DPT`]) | Depth of Water                                          | Water depth with offset          |
-/// | GGA([`GGA`]) | Global Positioning System Fix Data                      | GPS position and fix quality     |
-/// | GLL([`GLL`]) | Geographic Position - Latitude/Longitude                | Latitude/longitude with time     |
-/// | GSA([`GSA`]) | GPS DOP and active satellites                           | Satellite constellation info     |
-/// | GSV([`GSV`]) | Satellites in View                                      | Individual satellite details     |
-/// | RMC([`RMC`]) | Recommended Minimum Navigation Information              | Essential navigation data        |
-/// | VTG([`VTG`]) | Track made good and Ground speed                        | Velocity information             |
-/// | ZDA([`ZDA`]) | Time & Date - UTC, day, month, year and local time zone | UTC time and date with time zone |
+/// | Variant | Sentence Type                                           | Description                      |
+/// |---------|---------------------------------------------------------|----------------------------------|
+/// | DBT     | Depth Below Transducer                                  | Water depth measurements         |
+/// | DPT     | Depth of Water                                          | Water depth with offset          |
+/// | GGA     | Global Positioning System Fix Data                      | GPS position and fix quality     |
+/// | GLL     | Geographic Position - Latitude/Longitude                | Latitude/longitude with time     |
+/// | GSA     | GPS DOP and active satellites                           | Satellite constellation info     |
+/// | GSV     | Satellites in View                                      | Individual satellite details     |
+/// | RMC     | Recommended Minimum Navigation Information              | Essential navigation data        |
+/// | VTG     | Track made good and Ground speed                        | Velocity information             |
+/// | ZDA     | Time & Date - UTC, day, month, year and local time zone | UTC time and date with time zone |
 ///
 /// ## NMEA Version Support
 ///
-/// Different NMEA versions may include additional fields. Enable appropriate feature flags:
-/// - `nmea-content`: Basic NMEA parsing (pre-2.3)
-/// - `nmea-v2-3`: NMEA 2.3 support  
-/// - `nmea-v3-0`: NMEA 3.0 support (includes v2.3)
-/// - `nmea-v4-11`: NMEA 4.11 support (includes v3.0)
+/// Different NMEA versions may include additional fields in certain sentence types. You can choose the version that matches your equipment by enabling the appropriate feature flags.
+///
+/// | Feature Flag   | NMEA Version | When to Use                |
+/// | -------------- | ------------ | -------------------------- |
+/// | `nmea-content` | Pre-2.3      | Standard NMEA parsing      |
+/// | `nmea-v2-3`    | NMEA 2.3     | Older GPS/marine equipment |
+/// | `nmea-v3-0`    | NMEA 3.0     | Mid-range equipment        |
+/// | `nmea-v4-11`   | NMEA 4.11    | Modern equipment           |
 ///
 /// ## Error Handling
 ///
@@ -177,238 +140,254 @@ pub trait Parsable: Sized {
 /// - Invalid field values (non-numeric where numbers expected, etc.)
 ///
 /// ```rust
-/// use nmea0183_parser::nmea_content::{NmeaSentence, Parsable};
+/// use nmea0183_parser::{IResult, NmeaParse, nmea_content::NmeaSentence};
 ///
 /// // This will fail - unrecognized sentence type
-/// let result = NmeaSentence::parser("GPUNK,some,data,here");
+/// let result: IResult<_, _> = NmeaSentence::parse("GPUNK,some,data,here");
 /// assert!(result.is_err());
 ///
 /// // This will fail - malformed GGA sentence
-/// let result = NmeaSentence::parser("GPGGA,invalid,data");
+/// let result: IResult<_, _> = NmeaSentence::parse("GPGGA,invalid,data");
 /// assert!(result.is_err());
 /// ```
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, NmeaParse)]
+#[nmea(pre_exec(let msg = nmea_input;))]
+// TODO: Handle talker ID
+#[nmea(skip_before(2))]
+#[nmea(selector(take(3u8)))]
+#[nmea(selection_error(Error::UnrecognizedMessage(msg)))]
+#[nmea(exact)]
 pub enum NmeaSentence {
+    #[nmea(selector("DBT"))]
     /// Depth Below Transducer
     DBT(DBT),
+    #[nmea(selector("DPT"))]
     /// Depth of Water
     DPT(DPT),
+    #[nmea(selector("GGA"))]
     /// Global Positioning System Fix Data
     GGA(GGA),
+    #[nmea(selector("GLL"))]
     /// Geographic Position - Latitude/Longitude
     GLL(GLL),
+    #[nmea(selector("GSA"))]
     /// GPS DOP and active satellites
     GSA(GSA),
+    #[nmea(selector("GSV"))]
     /// Satellites in View
     GSV(GSV),
+    #[nmea(selector("RMC"))]
     /// Recommended Minimum Navigation Information
     RMC(RMC),
+    #[nmea(selector("VTG"))]
     /// Track made good and Ground speed
     VTG(VTG),
+    #[nmea(selector("ZDA"))]
     /// Time & Date - UTC, day, month, year and local time zone
     ZDA(ZDA),
 }
 
-impl Parsable for NmeaSentence {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let msg = i;
-
-        // TODO: Handle talker ID and sentence type parsing
-        let (i, _talker_id) = take(2u8).parse(i)?;
-        let (i, sentence_type) = take(3u8).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-
-        let (i, sentence) = match sentence_type {
-            "DBT" => DBT::parser.map(Self::DBT).parse(i)?,
-            "DPT" => DPT::parser.map(Self::DPT).parse(i)?,
-            "GGA" => GGA::parser.map(Self::GGA).parse(i)?,
-            "GLL" => GLL::parser.map(Self::GLL).parse(i)?,
-            "GSA" => GSA::parser.map(Self::GSA).parse(i)?,
-            "GSV" => GSV::parser.map(Self::GSV).parse(i)?,
-            "RMC" => RMC::parser.map(Self::RMC).parse(i)?,
-            "VTG" => VTG::parser.map(Self::VTG).parse(i)?,
-            "ZDA" => ZDA::parser.map(Self::ZDA).parse(i)?,
-            _ => return Err(nom::Err::Error(Error::UnrecognizedMessage(msg))),
-        };
-
-        let (i, _) = consumed(take(0u8), ErrorKind::Eof).parse(i)?;
-        Ok((i, sentence))
-    }
-}
-
-macro_rules! parsable_enum {
-    (
-        $(#[$meta:meta])*
-        $vis:vis enum $name:ident {
-            $(
-                $(#[$variant_meta:meta])*
-                $char:literal => $variant:ident
-            ),* $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-        #[derive(Debug, PartialEq)]
-        $vis enum $name {
-            $(
-                $(#[$variant_meta])*
-                $variant,
-            )*
-        }
-
-        impl Parsable for $name {
-            fn parser(i: &str) -> IResult<&str, Self> {
-                nom::branch::alt(($(
-                    #[allow(unused_doc_comments)]
-                    $(#[$variant_meta])*
-                    nom::character::complete::char($char).map(|_| Self::$variant),
-                )*)).parse(i)
-            }
-        }
-    };
-}
-
-parsable_enum! {
-    /// Status Mode Indicator
-    pub enum Status {
-        /// A - Valid
-        'A' => Valid,
-        /// V - Invalid
-        'V' => Invalid,
-    }
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[nmea(selector(one_of("AV")))]
+/// Status Mode Indicator
+pub enum Status {
+    #[nmea(selector('A'))]
+    /// A - Valid
+    Valid,
+    #[nmea(selector('V'))]
+    /// V - Invalid
+    Invalid,
 }
 
 #[cfg(feature = "nmea-v2-3")]
-parsable_enum! {
-    /// FAA Mode Indicator
-    ///
-    /// <https://gpsd.gitlab.io/gpsd/NMEA.html#_sentence_mixes_and_nmea_variations>
-    pub enum FaaMode {
-        /// A - Autonomous mode
-        'A' => Autonomous,
-        /// C - Quectel Querk, "Caution"
-        'C' => Caution,
-        /// D - Differential Mode
-        'D' => Differential,
-        /// E - Estimated (dead-reckoning) mode
-        'E' => Estimated,
-        /// F - RTK Float mode
-        'F' => FloatRtk,
-        /// M - Manual Input Mode
-        'M' => Manual,
-        /// N - Data Not Valid
-        'N' => DataNotValid,
-        #[cfg(feature = "nmea-v4-11")]
-        /// P - Precise
-        'P' => Precise,
-        /// R - RTK Integer mode
-        'R' => FixedRtk,
-        /// S - Simulated Mode
-        'S' => Simulator,
-        /// U - Quectel Querk, "Unsafe"
-        'U' => Unsafe,
-    }
+#[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[cfg_attr(not(feature = "nmea-v4-11"), nmea(selector(one_of("ACDEFMNRSU"))))]
+#[cfg_attr(feature = "nmea-v4-11", nmea(selector(one_of("ACDEFMNPRSU"))))]
+/// FAA Mode Indicator
+///
+/// <https://gpsd.gitlab.io/gpsd/NMEA.html#_sentence_mixes_and_nmea_variations>
+pub enum FaaMode {
+    #[nmea(selector('A'))]
+    /// A - Autonomous mode
+    Autonomous,
+    #[nmea(selector('C'))]
+    /// C - Quectel Querk, "Caution"
+    Caution,
+    #[nmea(selector('D'))]
+    /// D - Differential Mode
+    Differential,
+    #[nmea(selector('E'))]
+    /// E - Estimated (dead-reckoning) mode
+    Estimated,
+    #[nmea(selector('F'))]
+    /// F - RTK Float mode
+    FloatRtk,
+    #[nmea(selector('M'))]
+    /// M - Manual Input Mode
+    Manual,
+    #[nmea(selector('N'))]
+    /// N - Data Not Valid
+    DataNotValid,
+    #[cfg(feature = "nmea-v4-11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
+    #[nmea(selector('P'))]
+    /// P - Precise
+    Precise,
+    #[nmea(selector('R'))]
+    /// R - RTK Integer mode
+    FixedRtk,
+    #[nmea(selector('S'))]
+    /// S - Simulated Mode
+    Simulator,
+    #[nmea(selector('U'))]
+    /// U - Quectel Querk, "Unsafe"
+    Unsafe,
 }
 
 #[cfg(feature = "nmea-v4-11")]
-parsable_enum! {
-    /// Navigation Status
-    pub enum NavStatus {
-        /// A - Autonomous mode
-        'A' => Autonomous,
-        /// D - Differential Mode
-        'D' => Differential,
-        /// E - Estimated (dead-reckoning) mode
-        'E' => Estimated,
-        /// M - Manual Input Mode
-        'M' => Manual,
-        /// N - Not Valid
-        'N' => NotValid,
-        /// S - Simulated Mode
-        'S' => Simulator,
-        /// V - Valid
-        'V' => Valid,
-    }
+#[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[nmea(selector(one_of("ADEMNSV")))]
+/// Navigation Status
+pub enum NavStatus {
+    #[nmea(selector('A'))]
+    /// A - Autonomous mode
+    Autonomous,
+    #[nmea(selector('D'))]
+    /// D - Differential Mode
+    Differential,
+    #[nmea(selector('E'))]
+    /// E - Estimated (dead-reckoning) mode
+    Estimated,
+    #[nmea(selector('M'))]
+    /// M - Manual Input Mode
+    Manual,
+    #[nmea(selector('N'))]
+    /// N - Not Valid
+    NotValid,
+    #[nmea(selector('S'))]
+    /// S - Simulated Mode
+    Simulator,
+    #[nmea(selector('V'))]
+    /// V - Valid
+    Valid,
 }
 
-parsable_enum! {
-    /// Quality of the GPS fix
-    pub enum Quality {
-        /// 0 - Fix not available
-        '0' => NoFix,
-        /// 1 - GPS fix
-        '1' => GPSFix,
-        /// 2 - Differential GPS fix
-        '2' => DGPSFix,
-        #[cfg(feature = "nmea-v2-3")]
-        /// 3 - PPS fix
-        '3' => PPSFix,
-        #[cfg(feature = "nmea-v2-3")]
-        /// 4 - Real Time Kinematic
-        '4' => RTK,
-        #[cfg(feature = "nmea-v2-3")]
-        /// 5 - Float RTK
-        '5' => FloatRTK,
-        #[cfg(feature = "nmea-v2-3")]
-        /// 6 - estimated (dead reckoning)
-        '6' => Estimated,
-        #[cfg(feature = "nmea-v2-3")]
-        /// 7 - Manual input mode
-        '7' => Manual,
-        #[cfg(feature = "nmea-v2-3")]
-        /// 8 - Simulation mode
-        '8' => Simulation,
-    }
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[cfg_attr(not(feature = "nmea-v2-3"), nmea(selector(one_of("012"))))]
+#[cfg_attr(feature = "nmea-v2-3", nmea(selector(one_of("012345678"))))]
+/// Quality of the GPS fix
+pub enum Quality {
+    #[nmea(selector('0'))]
+    /// 0 - Fix not available
+    NoFix,
+    #[nmea(selector('1'))]
+    /// 1 - GPS fix
+    GPSFix,
+    #[nmea(selector('2'))]
+    /// 2 - Differential GPS fix
+    DGPSFix,
+    #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+    #[nmea(selector('3'))]
+    /// 3 - PPS fix
+    PPSFix,
+    #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+    #[nmea(selector('4'))]
+    /// 4 - Real Time Kinematic
+    RTK,
+    #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+    #[nmea(selector('5'))]
+    /// 5 - Float RTK
+    FloatRTK,
+    #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+    #[nmea(selector('6'))]
+    /// 6 - estimated (dead reckoning)
+    Estimated,
+    #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+    #[nmea(selector('7'))]
+    /// 7 - Manual input mode
+    Manual,
+    #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
+    #[nmea(selector('8'))]
+    /// 8 - Simulation mode
+    Simulation,
 }
 
-parsable_enum! {
-    /// Selection Mode
-    pub enum SelectionMode {
-        /// A - Automatic, 2D/3D
-        'A' => Automatic,
-        /// M - Manual, forced to operate in 2D or 3D
-        'M' => Manual,
-    }
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[nmea(selector(one_of("AM")))]
+/// Selection Mode
+pub enum SelectionMode {
+    #[nmea(selector('A'))]
+    /// A - Automatic, 2D/3D
+    Automatic,
+    #[nmea(selector('M'))]
+    /// M - Manual, forced to operate in 2D or 3D
+    Manual,
 }
 
-parsable_enum! {
-    /// Fix Mode
-    pub enum FixMode {
-        /// 1 - No fix
-        '1' => NoFix,
-        /// 2 - 2D Fix
-        '2' => Fix2D,
-        /// 3 - 3D Fix
-        '3' => Fix3D,
-    }
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[nmea(selector(one_of("123")))]
+/// Fix Mode
+pub enum FixMode {
+    #[nmea(selector('1'))]
+    /// 1 - No fix
+    NoFix,
+    #[nmea(selector('2'))]
+    /// 2 - 2D Fix
+    Fix2D,
+    #[nmea(selector('3'))]
+    /// 3 - 3D Fix
+    Fix3D,
 }
 
 #[cfg(feature = "nmea-v4-11")]
-parsable_enum! {
-    /// NMEA 4.11 System ID
-    ///
-    /// <https://gpsd.gitlab.io/gpsd/NMEA.html#_nmea_4_11_system_id_and_signal_id>
-    pub enum SystemId {
-        /// 1 - GPS (GP)
-        '1' => Gps,
-        /// 2 - GLONASS (GL)
-        '2' => Glonass,
-        /// 3 - Galileo (GA)
-        '3' => Galileo,
-        /// 4 - BeiDou (GB/BD)
-        '4' => Beidou,
-        /// 5 - QZSS (GQ)
-        '5' => Qzss,
-        /// 6 - NavIC (GI)
-        '6' => Navic,
-    }
+#[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, PartialEq, NmeaParse)]
+#[nmea(selector(one_of("123456")))]
+/// NMEA 4.11 System ID
+///
+/// <https://gpsd.gitlab.io/gpsd/NMEA.html#_nmea_4_11_system_id_and_signal_id>
+pub enum SystemId {
+    #[nmea(selector('1'))]
+    /// 1 - GPS (GP)
+    Gps,
+    #[nmea(selector('2'))]
+    /// 2 - GLONASS (GL)
+    Glonass,
+    #[nmea(selector('3'))]
+    /// 3 - Galileo (GA)
+    Galileo,
+    #[nmea(selector('4'))]
+    /// 4 - BeiDou (GB/BD)
+    Beidou,
+    #[nmea(selector('5'))]
+    /// 5 - QZSS (GQ)
+    Qzss,
+    #[nmea(selector('6'))]
+    /// 6 - NavIC (GI)
+    Navic,
 }
 
 /// NMEA 4.11 Signal ID
 ///
 /// <https://gpsd.gitlab.io/gpsd/NMEA.html#_nmea_4_11_system_id_and_signal_id>
 #[cfg(feature = "nmea-v4-11")]
+#[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
 pub type SignalId = u8;
 /*
  * // TODO:
@@ -424,52 +403,42 @@ pub type SignalId = u8;
  */
 
 /// Satellite information used in [`GSV`] sentences
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, Copy, NmeaParse)]
 pub struct Satellite {
+    /// PRN number of the satellite
     pub prn: u8,
+    /// Elevation in degrees (0-90)
     pub elevation: Option<u8>,
+    /// Azimuth in degrees (0-359)
     pub azimuth: Option<u16>,
+    /// Signal-to-Noise Ratio (SNR) in dBHz
     pub snr: Option<u8>,
 }
 
-impl Parsable for Satellite {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, prn) = u8.parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, elevation) = opt(u8).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, azimuth) = opt(u16).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, snr) = opt(u8).parse(i)?;
-
-        Ok((
-            i,
-            Self {
-                prn,
-                elevation,
-                azimuth,
-                snr,
-            },
-        ))
-    }
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone)]
+pub struct Location {
+    pub latitude: f64,
+    pub longitude: f64,
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
+    use crate::IResult;
 
     #[test]
     fn test_status() {
         assert_eq!(
-            (Status::parser("A") as IResult<_, _>).unwrap(),
+            (Status::parse("A") as IResult<_, _>).unwrap(),
             ("", Status::Valid)
         );
         assert_eq!(
-            (Status::parser("V") as IResult<_, _>).unwrap(),
+            (Status::parse("V") as IResult<_, _>).unwrap(),
             ("", Status::Invalid)
         );
-        assert!((Status::parser("K") as IResult<_, _>).is_err());
+        assert!((Status::parse("K") as IResult<_, _>).is_err());
     }
 
     #[test]
@@ -477,57 +446,57 @@ mod test {
         #[cfg(feature = "nmea-v2-3")]
         {
             assert_eq!(
-                (FaaMode::parser("A") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("A") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Autonomous)
             );
             assert_eq!(
-                (FaaMode::parser("C") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("C") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Caution)
             );
             assert_eq!(
-                (FaaMode::parser("D") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("D") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Differential)
             );
             assert_eq!(
-                (FaaMode::parser("E") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("E") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Estimated)
             );
             assert_eq!(
-                (FaaMode::parser("F") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("F") as IResult<_, _>).unwrap(),
                 ("", FaaMode::FloatRtk)
             );
             assert_eq!(
-                (FaaMode::parser("M") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("M") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Manual)
             );
             assert_eq!(
-                (FaaMode::parser("N") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("N") as IResult<_, _>).unwrap(),
                 ("", FaaMode::DataNotValid)
             );
             #[cfg(feature = "nmea-v4-11")]
             {
                 assert_eq!(
-                    (FaaMode::parser("P") as IResult<_, _>).unwrap(),
+                    (FaaMode::parse("P") as IResult<_, _>).unwrap(),
                     ("", FaaMode::Precise)
                 );
             }
             #[cfg(not(feature = "nmea-v4-11"))]
             {
-                assert!((FaaMode::parser("P") as IResult<_, _>).is_err());
+                assert!((FaaMode::parse("P") as IResult<_, _>).is_err());
             }
             assert_eq!(
-                (FaaMode::parser("R") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("R") as IResult<_, _>).unwrap(),
                 ("", FaaMode::FixedRtk)
             );
             assert_eq!(
-                (FaaMode::parser("S") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("S") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Simulator)
             );
             assert_eq!(
-                (FaaMode::parser("U") as IResult<_, _>).unwrap(),
+                (FaaMode::parse("U") as IResult<_, _>).unwrap(),
                 ("", FaaMode::Unsafe)
             );
-            assert!((FaaMode::parser("X") as IResult<_, _>).is_err());
+            assert!((FaaMode::parse("X") as IResult<_, _>).is_err());
         }
     }
 
@@ -535,102 +504,102 @@ mod test {
     #[test]
     fn test_gsa_quality() {
         assert_eq!(
-            (Quality::parser("0") as IResult<_, _>).unwrap(),
+            (Quality::parse("0") as IResult<_, _>).unwrap(),
             ("", Quality::NoFix)
         );
         assert_eq!(
-            (Quality::parser("1") as IResult<_, _>).unwrap(),
+            (Quality::parse("1") as IResult<_, _>).unwrap(),
             ("", Quality::GPSFix)
         );
         assert_eq!(
-            (Quality::parser("2") as IResult<_, _>).unwrap(),
+            (Quality::parse("2") as IResult<_, _>).unwrap(),
             ("", Quality::DGPSFix)
         );
         assert_eq!(
-            (Quality::parser("3") as IResult<_, _>).unwrap(),
+            (Quality::parse("3") as IResult<_, _>).unwrap(),
             ("", Quality::PPSFix)
         );
         assert_eq!(
-            (Quality::parser("4") as IResult<_, _>).unwrap(),
+            (Quality::parse("4") as IResult<_, _>).unwrap(),
             ("", Quality::RTK)
         );
         assert_eq!(
-            (Quality::parser("5") as IResult<_, _>).unwrap(),
+            (Quality::parse("5") as IResult<_, _>).unwrap(),
             ("", Quality::FloatRTK)
         );
         assert_eq!(
-            (Quality::parser("6") as IResult<_, _>).unwrap(),
+            (Quality::parse("6") as IResult<_, _>).unwrap(),
             ("", Quality::Estimated)
         );
         assert_eq!(
-            (Quality::parser("7") as IResult<_, _>).unwrap(),
+            (Quality::parse("7") as IResult<_, _>).unwrap(),
             ("", Quality::Manual)
         );
         assert_eq!(
-            (Quality::parser("8") as IResult<_, _>).unwrap(),
+            (Quality::parse("8") as IResult<_, _>).unwrap(),
             ("", Quality::Simulation)
         );
-        assert!((Quality::parser("9") as IResult<_, _>).is_err());
+        assert!((Quality::parse("9") as IResult<_, _>).is_err());
     }
 
     #[test]
-    fn test_ssa_mode1() {
+    fn test_selection_mode() {
         assert_eq!(
-            (SelectionMode::parser("A") as IResult<_, _>).unwrap(),
+            (SelectionMode::parse("A") as IResult<_, _>).unwrap(),
             ("", SelectionMode::Automatic)
         );
         assert_eq!(
-            (SelectionMode::parser("M") as IResult<_, _>).unwrap(),
+            (SelectionMode::parse("M") as IResult<_, _>).unwrap(),
             ("", SelectionMode::Manual)
         );
-        assert!((SelectionMode::parser("X") as IResult<_, _>).is_err());
+        assert!((SelectionMode::parse("X") as IResult<_, _>).is_err());
     }
 
     #[test]
-    fn test_ssa_mode2() {
+    fn test_fix_mode() {
         assert_eq!(
-            (FixMode::parser("1") as IResult<_, _>).unwrap(),
+            (FixMode::parse("1") as IResult<_, _>).unwrap(),
             ("", FixMode::NoFix)
         );
         assert_eq!(
-            (FixMode::parser("2") as IResult<_, _>).unwrap(),
+            (FixMode::parse("2") as IResult<_, _>).unwrap(),
             ("", FixMode::Fix2D)
         );
         assert_eq!(
-            (FixMode::parser("3") as IResult<_, _>).unwrap(),
+            (FixMode::parse("3") as IResult<_, _>).unwrap(),
             ("", FixMode::Fix3D)
         );
-        assert!((FixMode::parser("4") as IResult<_, _>).is_err());
+        assert!((FixMode::parse("4") as IResult<_, _>).is_err());
     }
 
     #[cfg(feature = "nmea-v4-11")]
     #[test]
     fn test_system_id() {
         assert_eq!(
-            (SystemId::parser("1") as IResult<_, _>).unwrap(),
+            (SystemId::parse("1") as IResult<_, _>).unwrap(),
             ("", SystemId::Gps)
         );
         assert_eq!(
-            (SystemId::parser("2") as IResult<_, _>).unwrap(),
+            (SystemId::parse("2") as IResult<_, _>).unwrap(),
             ("", SystemId::Glonass)
         );
         assert_eq!(
-            (SystemId::parser("3") as IResult<_, _>).unwrap(),
+            (SystemId::parse("3") as IResult<_, _>).unwrap(),
             ("", SystemId::Galileo)
         );
         assert_eq!(
-            (SystemId::parser("4") as IResult<_, _>).unwrap(),
+            (SystemId::parse("4") as IResult<_, _>).unwrap(),
             ("", SystemId::Beidou)
         );
         assert_eq!(
-            (SystemId::parser("5") as IResult<_, _>).unwrap(),
+            (SystemId::parse("5") as IResult<_, _>).unwrap(),
             ("", SystemId::Qzss)
         );
         assert_eq!(
-            (SystemId::parser("6") as IResult<_, _>).unwrap(),
+            (SystemId::parse("6") as IResult<_, _>).unwrap(),
             ("", SystemId::Navic)
         );
-        assert!((SystemId::parser("7") as IResult<_, _>).is_err());
+        assert!((SystemId::parse("7") as IResult<_, _>).is_err());
     }
 
     #[cfg(feature = "nmea-v2-3")]
@@ -691,7 +660,7 @@ mod test {
         ];
 
         for sentence in valid {
-            let result = NmeaSentence::parser(sentence);
+            let result: IResult<_, _> = NmeaSentence::parse(sentence);
             assert!(
                 result.is_ok(),
                 "Failed to parse valid sentence: {}, error: {:?}",
@@ -747,7 +716,7 @@ mod test {
         ];
 
         for sentence in invalid {
-            let result = NmeaSentence::parser(sentence);
+            let result: IResult<_, _> = NmeaSentence::parse(sentence);
             assert!(
                 result.is_err(),
                 "Parsed invalid sentence as valid: {}, sentence: {:?}",

@@ -1,6 +1,6 @@
 use nom::{Err, IResult, Parser, error::ErrorKind};
 
-use crate::{ChecksumMode, LineEndingMode, checksum_crlf};
+use crate::nmea0183::{ChecksumMode, LineEndingMode, checksum_crlf};
 
 #[test]
 fn test_checksum_crlf_ok() {

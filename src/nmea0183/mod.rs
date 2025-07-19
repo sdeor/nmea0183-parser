@@ -7,6 +7,8 @@
 //! - Checksum requirements (required or optional)
 //! - Line ending requirements (CRLF required or forbidden)
 
+// TODO: Consider converting to Nmea0183 Builder pattern for more flexibility
+
 use nom::{
     AsBytes, AsChar, Compare, Err, FindSubstring, Input, Parser,
     branch::alt,
@@ -19,8 +21,6 @@ use nom::{
 };
 
 use crate::{Error, IResult};
-
-type NmeaParser<'a, I, O, E> = dyn FnMut(I) -> IResult<I, O, E> + 'a;
 
 /// Defines how the parser should handle NMEA message checksums.
 ///
@@ -74,95 +74,176 @@ pub enum LineEndingMode {
     Forbidden,
 }
 
-/// Creates a configurable NMEA 0183 parser factory.
+/// Creates a configurable NMEA 0183-style parser factory.
 ///
-/// This function returns a factory that can be used to create NMEA parsers with
-/// different content parsing logic. The factory handles the standard NMEA framing
-/// (checksum, line endings) while allowing custom parsing of the message content.
+/// This struct allows you to configure the NMEA 0183 framing parser with different
+/// checksum and line ending modes before building the final parser.
 ///
-/// # Arguments
-///
-/// * `cc` - Checksum requirement:
-///   - [`ChecksumMode::Required`]: Parser will fail if no '*CC' is present
-///   - [`ChecksumMode::Optional`]: Parser accepts messages with or without '*CC',
-///     but validates checksum if present
-/// * `crlf` - CRLF requirement:
-///   - [`LineEndingMode::Required`]: Parser will fail if message doesn't end with `\r\n`
-///   - [`LineEndingMode::Forbidden`]: Parser will fail if message ends with `\r\n`
-///
-/// # Returns
-///
-/// A factory function that takes a content parser and returns a complete NMEA parser.
+/// It uses the builder pattern to allow for flexible configuration of the parser settings.
 ///
 /// # Examples
 ///
 /// ```rust
-/// use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, nmea0183};
-/// use nom::Parser;
+/// use nmea0183_parser::{IResult, Nmea0183ParserBuilder};
 ///
-/// // Create a parser factory with required checksum and CRLF
-/// let parser_factory = nmea0183(ChecksumMode::Required, LineEndingMode::Required);
-///
-/// // Define custom content parser
-/// fn parse_gps_data(i: &str) -> IResult<&str, String> {
-///     Ok((i, "parsed_data".to_string()))
+/// fn content_parser(input: &str) -> IResult<&str, Vec<&str>> {
+///     Ok(("", input.split(',').collect()))
 /// }
 ///
-/// // Create the actual parser
-/// let mut parser = parser_factory(parse_gps_data);
-///
-/// // Use the parser - this will succeed
-/// let result = parser.parse("$GPGGA,123456,data*41\r\n");
+/// // Create a parser with required checksum and CRLF
+/// let parser_factory = Nmea0183ParserBuilder::new();
+/// let mut parser = parser_factory.build(content_parser);
 /// ```
 ///
-/// # Configuration Examples
+/// ## Configuration
 ///
 /// ```rust
-/// use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, nmea0183};
+/// use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, Nmea0183ParserBuilder};
 /// use nom::Parser;
 ///
 /// fn content_parser(i: &str) -> IResult<&str, bool> {
 ///     Ok((i, true))
 /// }
 ///
-/// // Strict NMEA compliance - checksum and CRLF both required
-/// let mut strict_parser = nmea0183(ChecksumMode::Required, LineEndingMode::Required)(content_parser);
+/// // Strict: checksum and CRLF both required
+/// let mut strict_parser = Nmea0183ParserBuilder::new()
+///     .checksum_mode(ChecksumMode::Required)
+///     .line_ending_mode(LineEndingMode::Required)
+///     .build(content_parser);
 /// assert!(strict_parser.parse("$GPGGA,data*6A\r\n").is_ok());
-/// assert!(strict_parser.parse("$GPGGA,data*6A").is_err());  // (missing CRLF)
+/// assert!(strict_parser.parse("$GPGGA,data*6A").is_err()); // (missing CRLF)
 /// assert!(strict_parser.parse("$GPGGA,data\r\n").is_err()); // (missing checksum)
 ///
 /// // Checksum required, no CRLF allowed
-/// let mut no_crlf_parser = nmea0183(ChecksumMode::Required, LineEndingMode::Forbidden)(content_parser);
+/// let mut no_crlf_parser = Nmea0183ParserBuilder::new()
+///     .checksum_mode(ChecksumMode::Required)
+///     .line_ending_mode(LineEndingMode::Forbidden)
+///     .build(content_parser);
 /// assert!(no_crlf_parser.parse("$GPGGA,data*6A").is_ok());
 /// assert!(no_crlf_parser.parse("$GPGGA,data*6A\r\n").is_err()); // (CRLF present)
-/// assert!(no_crlf_parser.parse("$GPGGA,data").is_err());        // (missing checksum)
+/// assert!(no_crlf_parser.parse("$GPGGA,data").is_err()); // (missing checksum)
 ///
 /// // Checksum optional, CRLF required
-/// let mut optional_checksum_parser = nmea0183(ChecksumMode::Optional, LineEndingMode::Required)(content_parser);
-/// assert!(optional_checksum_parser.parse("$GPGGA,data*6A\r\n").is_ok());  // (with valid checksum)
-/// assert!(optional_checksum_parser.parse("$GPGGA,data\r\n").is_ok());     // (without checksum)
+/// let mut optional_checksum_parser = Nmea0183ParserBuilder::new()
+///     .checksum_mode(ChecksumMode::Optional)
+///     .line_ending_mode(LineEndingMode::Required)
+///     .build(content_parser);
+/// assert!(optional_checksum_parser.parse("$GPGGA,data*6A\r\n").is_ok()); // (with valid checksum)
+/// assert!(optional_checksum_parser.parse("$GPGGA,data\r\n").is_ok()); // (without checksum)
 /// assert!(optional_checksum_parser.parse("$GPGGA,data*99\r\n").is_err()); // (invalid checksum)
-/// assert!(optional_checksum_parser.parse("$GPGGA,data*6A").is_err());     // (missing CRLF)
+/// assert!(optional_checksum_parser.parse("$GPGGA,data*6A").is_err()); // (missing CRLF)
 ///
-/// // Lenient parsing - checksum optional, no CRLF allowed
-/// let mut lenient_parser = nmea0183(ChecksumMode::Optional, LineEndingMode::Forbidden)(content_parser);
-/// assert!(lenient_parser.parse("$GPGGA,data*6A").is_ok());   // (with valid checksum)
-/// assert!(lenient_parser.parse("$GPGGA,data").is_ok());      // (without checksum)
-/// assert!(lenient_parser.parse("$GPGGA,data*99").is_err());  // (invalid checksum)
+/// // Lenient: checksum optional, CRLF forbidden
+/// let mut lenient_parser = Nmea0183ParserBuilder::new()
+///     .checksum_mode(ChecksumMode::Optional)
+///     .line_ending_mode(LineEndingMode::Forbidden)
+///     .build(content_parser);
+/// assert!(lenient_parser.parse("$GPGGA,data*6A").is_ok()); // (with valid checksum)
+/// assert!(lenient_parser.parse("$GPGGA,data").is_ok()); // (without checksum)
+/// assert!(lenient_parser.parse("$GPGGA,data*99").is_err()); // (invalid checksum)
 /// assert!(lenient_parser.parse("$GPGGA,data\r\n").is_err()); // (CRLF present)
 /// ```
-pub fn nmea0183<'a, I, O, F, E>(
-    cc: ChecksumMode,
-    crlf: LineEndingMode,
-) -> impl Fn(F) -> Box<NmeaParser<'a, I, O, E>>
-where
-    I: Input + AsBytes + Compare<&'a str> + FindSubstring<&'a str> + 'a,
-    <I as Input>::Item: AsChar,
-    O: 'a,
-    F: Parser<I, Output = O, Error = Error<I, E>> + 'a,
-    E: ParseError<I> + 'a,
-{
-    move |f: F| Box::new(nmea0183_inner(f, checksum_crlf(cc, crlf)))
+#[must_use]
+pub struct Nmea0183ParserBuilder {
+    /// Checksum mode for the parser.
+    checksum_mode: ChecksumMode,
+
+    /// Line ending mode for the parser.
+    line_ending_mode: LineEndingMode,
+}
+
+impl Nmea0183ParserBuilder {
+    /// Creates a new NMEA 0183 parser builder with default settings.
+    ///
+    /// The default settings are:
+    /// - Checksum mode: [`ChecksumMode::Required`]
+    /// - Line ending mode: [`LineEndingMode::Required`]
+    pub fn new() -> Self {
+        Nmea0183ParserBuilder {
+            checksum_mode: ChecksumMode::Required,
+            line_ending_mode: LineEndingMode::Required,
+        }
+    }
+
+    /// Sets the checksum mode for the parser.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The desired checksum mode:
+    ///   - [`ChecksumMode::Required`]: Checksum must be present and valid
+    ///   - [`ChecksumMode::Optional`]: Checksum may be absent or must be valid if present
+    pub fn checksum_mode(mut self, mode: ChecksumMode) -> Self {
+        self.checksum_mode = mode;
+        self
+    }
+
+    /// Sets the line ending mode for the parser.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The desired line ending mode:
+    ///   - [`LineEndingMode::Required`]: Message must end with `\r\n`
+    ///   - [`LineEndingMode::Forbidden`]: Message must not end with `\r\n`
+    pub fn line_ending_mode(mut self, mode: LineEndingMode) -> Self {
+        self.line_ending_mode = mode;
+        self
+    }
+
+    /// Builds the NMEA 0183-style parser with the configured settings.
+    ///
+    /// This method takes a user-provided parser function that will handle the
+    /// content of the message after the framing has been processed.
+    ///
+    /// The returned parser will:
+    /// * Validate that the input is ASCII-only
+    /// * Expect the message to start with `$`
+    /// * Extract the message content (everything before `*CC` or `\r\n`)
+    /// * Parse and validate the checksum using the provided checksum parser
+    /// * Call the user-provided parser on the message content
+    ///
+    /// # Arguments
+    ///
+    /// * `content_parser` - User-provided parser for the message content.
+    ///
+    /// # Returns
+    ///
+    /// A parser function that takes an input and returns a result containing the parsed content
+    /// or an error if the input does not conform to the expected NMEA 0183 format.
+    pub fn build<'a, I, O, F, E>(self, mut content_parser: F) -> impl FnMut(I) -> IResult<I, O, E>
+    where
+        I: Input + AsBytes + Compare<&'a str> + FindSubstring<&'a str>,
+        <I as Input>::Item: AsChar,
+        F: Parser<I, Output = O, Error = Error<I, E>>,
+        E: ParseError<I>,
+    {
+        move |i: I| {
+            if !i.as_bytes().is_ascii() {
+                return Err(nom::Err::Error(Error::NonAscii));
+            }
+
+            let (i, _) = char('$').parse(i)?;
+            let (cc, data) = alt((take_until("*"), take_until("\r\n"), rest)).parse(i)?;
+            let (_, cc) = checksum_crlf(self.checksum_mode, self.line_ending_mode).parse(cc)?;
+            let (data, calc_cc) = checksum(data);
+
+            if let Some(cc) = cc
+                && cc != calc_cc
+            {
+                return Err(nom::Err::Error(Error::ChecksumMismatch {
+                    expected: calc_cc,
+                    found: cc,
+                }));
+            }
+
+            content_parser.parse(data)
+        }
+    }
+}
+
+impl Default for Nmea0183ParserBuilder {
+    fn default() -> Self {
+        Nmea0183ParserBuilder::new()
+    }
 }
 
 /// Creates a parser for checksum and CRLF based on configuration.
@@ -193,7 +274,7 @@ where
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// use nmea0183_parser::{ChecksumMode, IResult, LineEndingMode, checksum_crlf};
 /// use nom::Parser;
 ///
@@ -209,7 +290,7 @@ where
 /// assert!(result1.is_ok());
 /// assert!(result2.is_ok());
 /// ```
-pub fn checksum_crlf<'a, I, E: ParseError<I>>(
+fn checksum_crlf<'a, I, E: ParseError<I>>(
     cc: ChecksumMode,
     le: LineEndingMode,
 ) -> impl FnMut(I) -> nom::IResult<I, Option<u8>, E>
@@ -222,7 +303,7 @@ where
 
         let (cc, parse_cc) = match cc {
             ChecksumMode::Required => char('*').map(|_| true).parse(i)?,
-            ChecksumMode::Optional => opt(char('*')).map(|parse_cc| parse_cc.is_some()).parse(i)?,
+            ChecksumMode::Optional => opt(char('*')).map(|asterisk| asterisk.is_some()).parse(i)?,
         };
 
         if parse_cc {
@@ -255,7 +336,7 @@ where
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// use nmea0183_parser::{IResult, LineEndingMode, crlf};
 /// use nom::Parser;
 ///
@@ -269,7 +350,7 @@ where
 /// let result: IResult<_, _> = parser.parse("data");
 /// assert_eq!(result, Ok(("data", ())));
 /// ```
-pub fn crlf<'a, I, E: ParseError<I>>(crlf: LineEndingMode) -> impl Fn(I) -> nom::IResult<I, (), E>
+fn crlf<'a, I, E: ParseError<I>>(crlf: LineEndingMode) -> impl Fn(I) -> nom::IResult<I, (), E>
 where
     I: Input + Compare<&'a str> + FindSubstring<&'a str>,
 {
@@ -319,16 +400,6 @@ where
 /// - `input` is returned unchanged (zero-copy)
 /// - `checksum` is the calculated XOR value as a u8
 ///
-/// # Examples
-///
-/// ```rust
-/// use nmea0183_parser::checksum;
-///
-/// // Calculate checksum for "GPGGA,123456,data"
-/// let (_, cc) = checksum("GPGGA,123456,data");
-/// assert_eq!(cc, 0x41);
-/// ```
-///
 /// # NMEA 0183 Standard
 ///
 /// According to the NMEA 0183 standard:
@@ -342,7 +413,7 @@ where
 /// - Efficient for small to medium message sizes (typical NMEA messages are < 100 bytes)
 /// - Single-pass algorithm with O(n) time complexity
 /// - No memory allocation (zero-copy input handling)
-pub fn checksum<I>(input: I) -> (I, u8)
+fn checksum<I>(input: I) -> (I, u8)
 where
     I: Input + AsBytes,
 {
@@ -352,76 +423,6 @@ where
         .fold(0u8, |accumulated_xor, &byte| accumulated_xor ^ byte);
 
     (input, calculated_checksum)
-}
-
-/// Formats a checksum value as a two-digit uppercase hexadecimal string.
-///
-/// # Examples
-///
-/// ```rust
-/// use nmea0183_parser::format_checksum;
-///
-/// let checksum = 0x41;
-/// assert_eq!(format_checksum(checksum), "41");
-///
-/// let checksum = 0x0A;
-/// assert_eq!(format_checksum(checksum), "0A");
-/// ```
-pub fn format_checksum(checksum: u8) -> String {
-    format!("{checksum:02X}")
-}
-
-/// Internal implementation of the NMEA 0183 parser.
-///
-/// This function handles the common NMEA message structure:
-/// 1. Validates that input is ASCII-only
-/// 2. Expects the message to start with '$'
-/// 3. Extracts the message content (everything before '*' or '\r\n')
-/// 4. Parses and validates the checksum using the provided checksum parser
-/// 5. Calls the user-provided parser on the message content
-///
-/// # Arguments
-///
-/// * `f` - User-provided parser for the message content
-/// * `cc_parser` - Parser for extracting and validating checksum
-///
-/// # Returns
-///
-/// A parser function that can be called with input to parse NMEA messages.
-fn nmea0183_inner<'a, I, O, F, CC, E>(
-    mut f: F,
-    mut cc_parser: CC,
-) -> impl FnMut(I) -> IResult<I, O, E>
-where
-    I: Input + AsBytes + Compare<&'a str> + FindSubstring<&'a str>,
-    <I as Input>::Item: AsChar,
-    F: Parser<I, Output = O, Error = Error<I, E>>,
-    CC: Parser<I, Output = Option<u8>, Error = Error<I, E>>,
-    E: ParseError<I>,
-{
-    move |i: I| {
-        if !i.as_bytes().is_ascii() {
-            return Err(nom::Err::Error(Error::NonAscii));
-        }
-
-        let (i, _) = char('$').parse(i)?;
-
-        let (cc, data) = alt((take_until("*"), take_until("\r\n"), rest)).parse(i)?;
-        let (_, cc) = cc_parser.parse(cc)?;
-
-        let (data, calc_cc) = checksum(data);
-
-        if let Some(cc) = cc
-            && cc != calc_cc
-        {
-            return Err(nom::Err::Error(Error::ChecksumMismatch {
-                expected: calc_cc,
-                found: cc,
-            }));
-        }
-
-        f.parse(data)
-    }
 }
 
 /// Ensures that the parser consumes all input.
@@ -436,7 +437,7 @@ where
 ///
 /// # Examples
 ///
-/// ```compile_fail
+/// ```ignore
 /// use nmea0183_parser::nmea0183::consumed;
 /// use nom::{IResult, Parser, bytes::complete::take, error::ErrorKind};
 ///
@@ -449,7 +450,7 @@ where
 /// let result = parser.parse("abcd");
 /// assert!(result.is_err());
 /// ```
-pub(crate) fn consumed<I, E: ParseError<I>, F>(
+fn consumed<I, E: ParseError<I>, F>(
     f: F,
     e: ErrorKind,
 ) -> impl Parser<I, Output = <F as Parser<I>>::Output, Error = E>
@@ -459,6 +460,16 @@ where
 {
     terminated(
         f,
-        verify(rest_len, |len| len == &0).or(move |i| Err(Err::Error(E::from_error_kind(i, e)))),
+        verify(rest_len, |len| len == &0)
+            .or(move |i| Err(Err::Error(nom::error::make_error(i, e)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    mod cc_crlf00;
+    mod cc_crlf01;
+    mod cc_crlf10;
+    mod cc_crlf11;
+    mod crlf;
 }

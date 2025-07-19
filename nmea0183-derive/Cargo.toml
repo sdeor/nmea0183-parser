@@ -1,0 +1,21 @@
+[package]
+name = "nmea0183-derive"
+version = "0.1.0"
+edition = "2024"
+authors = ["Ziv Sdeor <ziv.sdeor.dev@gmail.com>"]
+description = "Derive macro for NMEA 0183-style content parsing with nmea0183-parser"
+documentation = "https://docs.rs/nmea0183-derive"
+homepage = "https://github.com/sdeor/nmea0183-parser"
+repository = "https://github.com/sdeor/nmea0183-parser"
+keywords = ["nmea", "gps", "parser", "derive", "macro"]
+categories = ["parsing"]
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }

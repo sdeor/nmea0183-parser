@@ -1,4 +1,3 @@
-use nom::{Parser, character::complete::char, combinator::opt, number::complete::float};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -7,10 +6,10 @@ use crate::nmea_content::FaaMode;
 #[cfg(feature = "nmea-v4-11")]
 use crate::nmea_content::NavStatus;
 use crate::{
-    IResult,
+    self as nmea0183_parser, NmeaParse,
     nmea_content::{
-        Parsable, Status,
-        parse::{date, latlon, magnetic_variation, time},
+        Location, Status,
+        parse::{location, magnetic_variation},
     },
 };
 
@@ -39,72 +38,46 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug)]
+#[derive(Debug, NmeaParse)]
 pub struct RMC {
     /// Fix time in UTC
     pub fix_time: Option<time::Time>,
-    /// Fix date in UTC
-    pub fix_date: Option<time::Date>,
     /// Status Mode Indicator
     pub status: Status,
-    /// Latitude in degrees
-    pub latitude: Option<f64>,
-    /// Longitude in degrees
-    pub longitude: Option<f64>,
+    #[nmea(parser(location))]
+    /// Location (latitude and longitude)
+    pub location: Option<Location>,
     /// Speed over ground in knots
     pub speed_over_ground: Option<f32>,
     /// Course over ground in degrees
     pub course_over_ground: Option<f32>,
+    /// Fix date in UTC
+    pub fix_date: Option<time::Date>,
+    #[nmea(parser(magnetic_variation))]
     /// Magnetic variation in degrees
     pub magnetic_variation: Option<f32>,
     #[cfg(feature = "nmea-v2-3")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
     /// FAA Mode Indicator
     pub faa_mode: Option<FaaMode>,
     #[cfg(feature = "nmea-v4-11")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
     /// Navigation status
     pub nav_status: Option<NavStatus>,
 }
 
-impl Parsable for RMC {
-    fn parser(i: &str) -> IResult<&str, Self> {
-        let (i, fix_time) = opt(time).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, status) = Status::parser(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, (latitude, longitude)) = latlon.parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, speed_over_ground) = opt(float).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, course_over_ground) = opt(float).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, fix_date) = opt(date).parse(i)?;
-        let (i, _) = char(',').parse(i)?;
-        let (i, magnetic_variation) = magnetic_variation.parse(i)?;
-        #[cfg(feature = "nmea-v2-3")]
-        let (i, _) = char(',').parse(i)?;
-        #[cfg(feature = "nmea-v2-3")]
-        let (i, faa_mode) = opt(FaaMode::parser).parse(i)?;
-        #[cfg(feature = "nmea-v4-11")]
-        let (i, _) = char(',').parse(i)?;
-        #[cfg(feature = "nmea-v4-11")]
-        let (i, nav_status) = opt(NavStatus::parser).parse(i)?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::IResult;
 
-        Ok((
-            i,
-            Self {
-                fix_time,
-                fix_date,
-                status,
-                latitude,
-                longitude,
-                speed_over_ground,
-                course_over_ground,
-                magnetic_variation,
-                #[cfg(feature = "nmea-v2-3")]
-                faa_mode,
-                #[cfg(feature = "nmea-v4-11")]
-                nav_status,
-            },
-        ))
+    #[test]
+    fn test_rmc_parsing() {
+        let cases = ["001031.00,A,4404.13993,N,12118.86023,W,0.146,,100117,,,A,V"];
+
+        for &input in &cases {
+            let result: IResult<_, _> = RMC::parse(input);
+            assert!(result.is_ok(), "Failed: {input:?}\n\t{result:?}");
+        }
     }
 }

@@ -7,8 +7,6 @@
 //! - Checksum requirements (required or optional)
 //! - Line ending requirements (CRLF required or forbidden)
 
-// TODO: Consider converting to Nmea0183 Builder pattern for more flexibility
-
 use nom::{
     AsBytes, AsChar, Compare, Err, FindSubstring, Input, Parser,
     branch::alt,
@@ -27,8 +25,9 @@ use crate::{Error, IResult};
 /// NMEA 0183 messages can include an optional checksum in the format `*CC` where
 /// CC is a two-digit hexadecimal value representing the XOR of all bytes in the
 /// message content (excluding the '$' prefix and '*' delimiter).
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum ChecksumMode {
+    #[default]
     /// Checksum is required and must be present.
     ///
     /// The parser will fail if no `*CC` checksum is found at the end of the message.
@@ -52,8 +51,9 @@ pub enum ChecksumMode {
 ///
 /// NMEA 0183 messages typically end with a carriage return and line feed (`\r\n`),
 /// but some systems or applications may omit these characters.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum LineEndingMode {
+    #[default]
     /// CRLF line ending is required and must be present.
     ///
     /// The parser will fail if the message does not end with `\r\n`.

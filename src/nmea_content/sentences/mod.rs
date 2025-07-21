@@ -151,7 +151,7 @@ use crate::{self as nmea0183_parser, Error, NmeaParse};
 /// assert!(result.is_err());
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, NmeaParse)]
+#[derive(Debug, Clone, PartialEq, NmeaParse)]
 #[nmea(pre_exec(let msg = nmea_input;))]
 // TODO: Handle talker ID
 #[nmea(skip_before(2))]
@@ -189,13 +189,14 @@ pub enum NmeaSentence {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[nmea(selector(one_of("AV")))]
 /// Status Mode Indicator
 pub enum Status {
     #[nmea(selector('A'))]
     /// A - Valid
     Valid,
+    #[default]
     #[nmea(selector('V'))]
     /// V - Invalid
     Invalid,
@@ -204,7 +205,7 @@ pub enum Status {
 #[cfg(feature = "nmea-v2-3")]
 #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v2-3")))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[cfg_attr(not(feature = "nmea-v4-11"), nmea(selector(one_of("ACDEFMNRSU"))))]
 #[cfg_attr(feature = "nmea-v4-11", nmea(selector(one_of("ACDEFMNPRSU"))))]
 /// FAA Mode Indicator
@@ -229,6 +230,7 @@ pub enum FaaMode {
     #[nmea(selector('M'))]
     /// M - Manual Input Mode
     Manual,
+    #[default]
     #[nmea(selector('N'))]
     /// N - Data Not Valid
     DataNotValid,
@@ -251,7 +253,7 @@ pub enum FaaMode {
 #[cfg(feature = "nmea-v4-11")]
 #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[nmea(selector(one_of("ADEMNSV")))]
 /// Navigation Status
 pub enum NavStatus {
@@ -267,6 +269,7 @@ pub enum NavStatus {
     #[nmea(selector('M'))]
     /// M - Manual Input Mode
     Manual,
+    #[default]
     #[nmea(selector('N'))]
     /// N - Not Valid
     NotValid,
@@ -279,11 +282,12 @@ pub enum NavStatus {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[cfg_attr(not(feature = "nmea-v2-3"), nmea(selector(one_of("012"))))]
 #[cfg_attr(feature = "nmea-v2-3", nmea(selector(one_of("012345678"))))]
 /// Quality of the GPS fix
 pub enum Quality {
+    #[default]
     #[nmea(selector('0'))]
     /// 0 - Fix not available
     NoFix,
@@ -326,10 +330,11 @@ pub enum Quality {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[nmea(selector(one_of("AM")))]
 /// Selection Mode
 pub enum SelectionMode {
+    #[default]
     #[nmea(selector('A'))]
     /// A - Automatic, 2D/3D
     Automatic,
@@ -339,10 +344,11 @@ pub enum SelectionMode {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[nmea(selector(one_of("123")))]
 /// Fix Mode
 pub enum FixMode {
+    #[default]
     #[nmea(selector('1'))]
     /// 1 - No fix
     NoFix,
@@ -357,12 +363,13 @@ pub enum FixMode {
 #[cfg(feature = "nmea-v4-11")]
 #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 #[nmea(selector(one_of("123456")))]
 /// NMEA 4.11 System ID
 ///
 /// <https://gpsd.gitlab.io/gpsd/NMEA.html#_nmea_4_11_system_id_and_signal_id>
 pub enum SystemId {
+    #[default]
     #[nmea(selector('1'))]
     /// 1 - GPS (GP)
     Gps,
@@ -404,7 +411,7 @@ pub type SignalId = u8;
 
 /// Satellite information used in [`GSV`] sentences
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone, Copy, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct Satellite {
     /// PRN number of the satellite
     pub prn: u8,
@@ -417,7 +424,7 @@ pub struct Satellite {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Location {
     pub latitude: f64,
     pub longitude: f64,

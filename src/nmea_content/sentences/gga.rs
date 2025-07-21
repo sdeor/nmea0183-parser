@@ -23,7 +23,7 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct GGA {
     /// Fix time in UTC
     pub fix_time: Option<time::Time>,

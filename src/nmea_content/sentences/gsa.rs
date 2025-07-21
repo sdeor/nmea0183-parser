@@ -26,7 +26,7 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug, PartialEq, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct GSA {
     /// Selection mode
     pub selection_mode: SelectionMode,

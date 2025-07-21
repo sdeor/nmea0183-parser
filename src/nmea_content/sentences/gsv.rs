@@ -18,7 +18,7 @@ use crate::{self as nmea0183_parser, NmeaParse, nmea_content::Satellite};
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct GSV {
     /// Total number of GSV sentences to be transmitted in this group
     pub total_messages: u8,

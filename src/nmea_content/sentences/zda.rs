@@ -17,7 +17,7 @@ use crate::{
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct ZDA {
     /// Fix time in UTC
     pub time: Option<time::Time>,

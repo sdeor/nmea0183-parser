@@ -21,7 +21,7 @@ use crate::{self as nmea0183_parser, NmeaParse};
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct DPT {
     /// Water depth relative to transducer in meters
     pub water_depth: Option<f32>,

@@ -28,7 +28,7 @@ use crate::{self as nmea0183_parser, IResult, NmeaParse, nmea_content::parse::wi
 /// ```
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[derive(Debug, NmeaParse)]
+#[derive(Debug, Default, Clone, PartialEq, NmeaParse)]
 pub struct VTG {
     #[nmea(parser(with_unit('T')))]
     /// Course over ground in degrees true

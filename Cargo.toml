@@ -1,6 +1,6 @@
 [package]
 name = "nmea0183-parser"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 authors = ["Ziv Sdeor <ziv.sdeor.dev@gmail.com>"]
 description = "A zero-allocation NMEA 0183 parser that separates message framing from content parsing"
@@ -20,7 +20,7 @@ nom = "8.0.0"
 heapless = { version = "0.8.0", optional = true }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 time = { version = "0.3.41", optional = true }
-nmea0183-derive = { path = "./nmea0183-derive", version = "0.1.0", optional = true }
+nmea0183-derive = { path = "./nmea0183-derive", version = "0.1.1", optional = true }
 
 [features]
 serde = ["dep:serde", "heapless/serde", "time/serde"]

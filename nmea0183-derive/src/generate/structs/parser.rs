@@ -40,6 +40,8 @@ impl StructParser {
         }
 
         let separator = &config.separator;
+        let error_type = &config.error_type;
+        let nmea_lifetime = &config.lifetime;
 
         let mut first_field = !preceded;
         let mut parsers = vec![];
@@ -59,6 +61,7 @@ impl StructParser {
 
             let separator = Some(separator).filter(|_| !first_field && !ignore);
             let parser = Self::get_parser(&field.ty, &attributes, separator.cloned())?;
+            let parser = parser.as_nmeaparse(error_type, nmea_lifetime);
 
             if first_field && !ignore {
                 first_field = false;

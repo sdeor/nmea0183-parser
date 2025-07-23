@@ -20,6 +20,22 @@ pub enum Parser {
     },
 }
 
+impl Parser {
+    pub fn as_nmeaparse(self, error_type: &syn::Ident, nmea_lifetime: &syn::Lifetime) -> Self {
+        match self {
+            Self::Type { ty, separator } => {
+                let parser = if let Some(separator) = separator {
+                    quote! { <#ty as nmea0183_parser::NmeaParse<&#nmea_lifetime str, #error_type>>::parse_preceded(#separator) }
+                } else {
+                    quote! { <#ty as nmea0183_parser::NmeaParse<&#nmea_lifetime str, #error_type>>::parse }
+                };
+                Self::Raw(parser)
+            }
+            parser => parser,
+        }
+    }
+}
+
 impl ToTokens for Parser {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let token_stream = match self {

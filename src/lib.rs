@@ -278,7 +278,7 @@
 //!
 //! ### Deriving the `NmeaParse` Trait
 //!
-//! Based on [`nom-derive`] and with a lot of similarities, `NmeaParse` is a custom derive
+//! Based on [`nom-derive`](https://crates.io/crates/nom-derive) and with a lot of similarities, `NmeaParse` is a custom derive
 //! attribute to derive content parsers for your NMEA 0183-style data structures.
 //!
 //! The `NmeaParse` derive macro automatically generates an implementation of the `NmeaParse` trait
@@ -376,7 +376,7 @@
 //! behavior using attributes.
 //!
 //! For more details on how to use the `NmeaParse` derive macro and customize parsing behavior,
-//! refer to the [documentation](https://docs.rs/nmea0183-parser/latest/nmea0183-parser/derive.NmeaParse.html).
+//! refer to the [documentation](https://docs.rs/nmea0183-parser/latest/nmea0183_parser/derive.NmeaParse.html).
 //!
 //! ---
 //!

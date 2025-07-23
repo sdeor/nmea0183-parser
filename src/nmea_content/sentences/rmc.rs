@@ -1,16 +1,22 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use nom::{
+    AsBytes, AsChar, Compare, Input, Offset, ParseTo, Parser,
+    branch::alt,
+    character::complete::{char, one_of},
+    combinator::value,
+    error::ParseError,
+    sequence::separated_pair,
+};
+
 #[cfg(feature = "nmea-v2-3")]
 use crate::nmea_content::FaaMode;
 #[cfg(feature = "nmea-v4-11")]
 use crate::nmea_content::NavStatus;
 use crate::{
-    self as nmea0183_parser, NmeaParse,
-    nmea_content::{
-        Location, Status,
-        parse::{location, magnetic_variation},
-    },
+    self as nmea0183_parser, IResult, NmeaParse,
+    nmea_content::{Location, Status, parse::location},
 };
 
 /// RMC - Recommended Minimum Navigation Information
@@ -64,6 +70,27 @@ pub struct RMC {
     #[cfg_attr(docsrs, doc(cfg(feature = "nmea-v4-11")))]
     /// Navigation status
     pub nav_status: Option<NavStatus>,
+}
+
+pub fn magnetic_variation<I, E>(i: I) -> IResult<I, Option<f32>, E>
+where
+    I: Input + Offset + ParseTo<f32> + AsBytes,
+    I: Compare<&'static str> + for<'a> Compare<&'a [u8]>,
+    <I as Input>::Item: AsChar,
+    <I as Input>::Iter: Clone,
+    E: ParseError<I>,
+{
+    alt((
+        value(None, char(',')),
+        separated_pair(f32::parse, char(','), one_of("EW")).map(|(value, dir)| {
+            if dir == 'W' {
+                Some(-value)
+            } else {
+                Some(value)
+            }
+        }),
+    ))
+    .parse(i)
 }
 
 #[cfg(test)]

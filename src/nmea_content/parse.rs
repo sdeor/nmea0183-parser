@@ -32,62 +32,6 @@ where
     take(count).and_then(T::parse)
 }
 
-pub fn date_full_year<I, E>(i: I) -> IResult<I, Option<time::Date>, E>
-where
-    I: Input,
-    I: Compare<&'static str> + for<'a> Compare<&'a [u8]>,
-    <I as Input>::Item: AsChar,
-    E: ParseError<I>,
-{
-    alt((value(None, tag(",,")), move |i: I| {
-        let (i, (day, month, year)) = (
-            u8::parse,
-            u8::parse_preceded(char(',')),
-            u16::parse_preceded(char(',')),
-        )
-            .parse(i)?;
-
-        let month = month
-            .try_into()
-            .or(Err(nom::Err::Error(nom::error::make_error(
-                i.clone(),
-                nom::error::ErrorKind::Verify,
-            ))))?;
-
-        let date =
-            time::Date::from_calendar_date(year as i32, month, day).or(Err(nom::Err::Error(
-                nom::error::make_error(i.clone(), nom::error::ErrorKind::Verify),
-            )))?;
-
-        Ok((i, Some(date)))
-    }))
-    .parse(i)
-}
-
-pub fn utc_offset<I, E>(i: I) -> IResult<I, Option<time::UtcOffset>, E>
-where
-    I: Input,
-    I: Compare<&'static str> + for<'a> Compare<&'a [u8]>,
-    <I as Input>::Item: AsChar,
-    E: ParseError<I>,
-{
-    alt((value(None, char(',')), move |i: I| {
-        let (i, (sign, hours, minutes)) =
-            (opt(one_of("+-")), i8::parse, i8::parse_preceded(char(','))).parse(i)?;
-        let (hours, minutes) = match sign {
-            Some('-') => (-hours, -minutes),
-            _ => (hours, minutes),
-        };
-
-        let time = time::UtcOffset::from_hms(hours, minutes, 0).or(Err(nom::Err::Error(
-            nom::error::make_error(i.clone(), nom::error::ErrorKind::Verify),
-        )))?;
-
-        Ok((i, Some(time)))
-    }))
-    .parse(i)
-}
-
 pub fn location<I, E>(i: I) -> IResult<I, Option<Location>, E>
 where
     I: Input + Offset + ParseTo<f64> + AsBytes,
@@ -124,27 +68,6 @@ where
                 latitude: lat,
                 longitude: lon,
             })
-        }),
-    ))
-    .parse(i)
-}
-
-pub fn magnetic_variation<I, E>(i: I) -> IResult<I, Option<f32>, E>
-where
-    I: Input + Offset + ParseTo<f32> + AsBytes,
-    I: Compare<&'static str> + for<'a> Compare<&'a [u8]>,
-    <I as Input>::Item: AsChar,
-    <I as Input>::Iter: Clone,
-    E: ParseError<I>,
-{
-    alt((
-        value(None, char(',')),
-        separated_pair(f32::parse, char(','), one_of("EW")).map(|(value, dir)| {
-            if dir == 'W' {
-                Some(-value)
-            } else {
-                Some(value)
-            }
         }),
     ))
     .parse(i)

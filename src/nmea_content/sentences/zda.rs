@@ -1,10 +1,16 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    self as nmea0183_parser, NmeaParse,
-    nmea_content::parse::{date_full_year, utc_offset},
+use nom::{
+    AsChar, Compare, Input, Parser,
+    branch::alt,
+    bytes::complete::tag,
+    character::complete::{char, one_of},
+    combinator::{opt, value},
+    error::ParseError,
 };
+
+use crate::{self as nmea0183_parser, IResult, NmeaParse};
 
 /// ZDA - Time & Date - UTC, day, month, year and local time zone
 ///
@@ -49,6 +55,62 @@ impl From<ZDA> for Option<time::OffsetDateTime> {
             None
         }
     }
+}
+
+fn date_full_year<I, E>(i: I) -> IResult<I, Option<time::Date>, E>
+where
+    I: Input,
+    I: Compare<&'static str> + for<'a> Compare<&'a [u8]>,
+    <I as Input>::Item: AsChar,
+    E: ParseError<I>,
+{
+    alt((value(None, tag(",,")), move |i: I| {
+        let (i, (day, month, year)) = (
+            u8::parse,
+            u8::parse_preceded(char(',')),
+            u16::parse_preceded(char(',')),
+        )
+            .parse(i)?;
+
+        let month = month
+            .try_into()
+            .or(Err(nom::Err::Error(nom::error::make_error(
+                i.clone(),
+                nom::error::ErrorKind::Verify,
+            ))))?;
+
+        let date =
+            time::Date::from_calendar_date(year as i32, month, day).or(Err(nom::Err::Error(
+                nom::error::make_error(i.clone(), nom::error::ErrorKind::Verify),
+            )))?;
+
+        Ok((i, Some(date)))
+    }))
+    .parse(i)
+}
+
+fn utc_offset<I, E>(i: I) -> IResult<I, Option<time::UtcOffset>, E>
+where
+    I: Input,
+    I: Compare<&'static str> + for<'a> Compare<&'a [u8]>,
+    <I as Input>::Item: AsChar,
+    E: ParseError<I>,
+{
+    alt((value(None, char(',')), move |i: I| {
+        let (i, (sign, hours, minutes)) =
+            (opt(one_of("+-")), i8::parse, i8::parse_preceded(char(','))).parse(i)?;
+        let (hours, minutes) = match sign {
+            Some('-') => (-hours, -minutes),
+            _ => (hours, minutes),
+        };
+
+        let time = time::UtcOffset::from_hms(hours, minutes, 0).or(Err(nom::Err::Error(
+            nom::error::make_error(i.clone(), nom::error::ErrorKind::Verify),
+        )))?;
+
+        Ok((i, Some(time)))
+    }))
+    .parse(i)
 }
 
 #[cfg(test)]

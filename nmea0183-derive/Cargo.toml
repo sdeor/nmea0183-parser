@@ -1,6 +1,6 @@
 [package]
 name = "nmea0183-derive"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Ziv Sdeor <ziv.sdeor.dev@gmail.com>"]
 description = "Derive macro for NMEA 0183-style content parsing with nmea0183-parser"
